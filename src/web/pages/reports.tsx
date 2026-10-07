@@ -40,6 +40,13 @@ export function ReportForm({ initial, onCreated, saveAsTemplate }: { initial?: R
   const [busy, setBusy] = useState(false);
   const def = types.data?.types.find((t) => t.key === v.report_type);
   const setParam = (k: string, x: any) => setV({ ...v, params: { ...v.params, [k]: x } });
+  const analyses = useApi<{ rows: Row[] }>(def?.ai_types?.length ? '/api/chatgpt/analyses' : null);
+  // Several records per report (one section each); a single *_id from older links/templates still counts.
+  const multi = (key: string, label: string, opts: { id: number; label: string }[]) => {
+    const one = key.slice(0, -1);
+    const value: number[] = v.params[key] ?? (v.params[one] ? [v.params[one]] : []);
+    return <label className="field full"><span>{label}</span><select className="input" multiple style={{ height: 120 }} value={value.map(String)} onChange={(e) => setV({ ...v, params: { ...v.params, [one]: undefined, [key]: [...e.target.selectedOptions].map((o) => Number(o.value)) } })}>{opts.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select><span className="hint">Ctrl/⌘-click to choose several — each gets its own section.</span></label>;
+  };
   const [from, to] = v.period === 'custom' ? [v.params.from ?? today, v.params.to ?? today] : p[v.period] ?? p.this_fy;
   useEffect(() => {
     if (def && !def[v.audience]) setV((x) => ({ ...x, audience: def.internal ? 'internal' : 'external' }));
@@ -52,16 +59,27 @@ export function ReportForm({ initial, onCreated, saveAsTemplate }: { initial?: R
         <label className="field"><span>Audience</span><select className="input" value={v.audience} onChange={(e) => setV({ ...v, audience: e.target.value })}>{def?.internal && <option value="internal">Internal</option>}{def?.external && <option value="external">External (client / creator safe)</option>}</select><span className="hint">{v.audience === 'external' ? 'Hides commissions, margins, private notes and unrelated financials.' : 'Full figures. Do not share outside Socialmog.'}</span></label>
         <label className="field"><span>Period</span><select className="input" value={v.period} onChange={(e) => setV({ ...v, period: e.target.value })}><option value="last_week">Last week</option><option value="this_month">This month</option><option value="last_month">Last month</option><option value="last_90">Last 90 days</option><option value="this_fy">This financial year</option><option value="custom">Custom…</option></select></label>
         {v.period === 'custom' && <><label className="field"><span>From</span><input type="date" className="input" value={from} onChange={(e) => setParam('from', e.target.value)} /></label><label className="field"><span>To</span><input type="date" className="input" value={to} onChange={(e) => setParam('to', e.target.value)} /></label></>}
-        {v.report_type === 'campaign' && <label className="field"><span>Campaign</span><select className="input" value={v.params.campaign_id ?? ''} onChange={(e) => setParam('campaign_id', Number(e.target.value))}><option value="">Choose…</option>{campaigns.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
-        {['influencer_growth', 'creator_statement'].includes(v.report_type) && <label className="field"><span>Creator</span><select className="input" value={v.params.influencer_id ?? ''} onChange={(e) => setParam('influencer_id', Number(e.target.value))}><option value="">Choose…</option>{influencers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
+        {v.report_type === 'campaign' && multi('campaign_ids', 'Campaigns', campaigns)}
+        {v.report_type === 'influencer_growth' && multi('influencer_ids', 'Creators', influencers)}
+        {v.report_type === 'editor_workload' && multi('editor_ids', 'Editors (leave empty for all)', editors)}
+        {v.report_type === 'creator_statement' && <label className="field"><span>Creator</span><select className="input" value={v.params.influencer_id ?? ''} onChange={(e) => setParam('influencer_id', Number(e.target.value))}><option value="">Choose…</option>{influencers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
         {v.report_type === 'brand_statement' && <label className="field"><span>Brand</span><select className="input" value={v.params.brand_id ?? ''} onChange={(e) => setParam('brand_id', Number(e.target.value))}><option value="">Choose…</option>{brands.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
         {v.report_type === 'editor_summary' && <label className="field"><span>Editor</span><select className="input" value={v.params.editor_id ?? ''} onChange={(e) => setParam('editor_id', Number(e.target.value))}><option value="">Choose…</option>{editors.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
         {v.report_type === 'roster' && <label className="field full"><span>Creators (leave empty for all active)</span><select className="input" multiple style={{ height: 120 }} value={(v.params.influencer_ids ?? []).map(String)} onChange={(e) => setParam('influencer_ids', [...e.target.selectedOptions].map((o) => Number(o.value)))}>{influencers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
       </div>
+      {def?.ai_types?.length > 0 && (!v.params.sections || v.params.sections.includes('chatgpt')) && (
+        <label className="field"><span>ChatGPT commentary</span>
+          <select className="input" value={v.params.analysis_id ?? ''} onChange={(e) => setParam('analysis_id', e.target.value ? Number(e.target.value) : undefined)}>
+            <option value="">{v.report_type === 'roster' ? 'None' : 'Latest imported analysis for this period, if any'}</option>
+            {analyses.data?.rows.filter((a) => def!.ai_types.includes(a.analysis_type) && (v.audience === 'internal' || a.shareable)).map((a) => <option key={a.id} value={a.id}>{humanize(a.analysis_type)} · {formatDate(a.period_start)} – {formatDate(a.period_end)} · imported {formatDate(a.created_at)}</option>)}
+          </select>
+          <span className="hint">Imported ChatGPT text goes in its own section, labelled as not calculated by Socialmog HQ.{v.audience === 'external' ? ' External reports only use analyses marked shareable.' : ''}</span>
+        </label>
+      )}
       {def && def.sections.length > 1 && (
         <div className="row small"><strong>Sections:</strong>{def.sections.map((s: string) => {
           const on = !v.params.sections || v.params.sections.includes(s);
-          return <label key={s} className="check"><input type="checkbox" checked={on} onChange={(e) => setParam('sections', (e.target.checked ? [...(v.params.sections ?? def.sections), s] : (v.params.sections ?? def.sections).filter((x: string) => x !== s)).filter((x: string, i: number, a: string[]) => a.indexOf(x) === i))} /> {humanize(s)}</label>;
+          return <label key={s} className="check"><input type="checkbox" checked={on} onChange={(e) => setParam('sections', (e.target.checked ? [...(v.params.sections ?? def.sections), s] : (v.params.sections ?? def.sections).filter((x: string) => x !== s)).filter((x: string, i: number, a: string[]) => a.indexOf(x) === i))} /> {s === 'chatgpt' ? 'ChatGPT commentary' : humanize(s)}</label>;
         })}</div>
       )}
       <div className="row">
@@ -93,7 +111,15 @@ function Centre() {
   const [sp] = useSearchParams();
   const nav = useNavigate();
   const q = useApi<{ rows: Row[] }>('/api/reports');
-  const initial = sp.get('type') ? { report_type: sp.get('type'), params: Object.fromEntries([...sp.entries()].filter(([k]) => k.endsWith('_id')).map(([k, x]) => [k, Number(x)])) } : undefined;
+  const initial = sp.get('type') ? (() => {
+    const params: Row = {};
+    for (const [k, x] of sp.entries()) {
+      if (k.endsWith('_ids')) params[k] = x.split(',').filter(Boolean).map(Number);
+      else if (k.endsWith('_id')) params[k] = Number(x);
+      else if (k === 'from' || k === 'to') params[k] = x;
+    }
+    return { report_type: sp.get('type'), params, ...(params.from ? { period: 'custom' } : {}) };
+  })() : undefined;
   useEffect(() => {
     if (!q.data?.rows.some((r) => ['queued', 'running'].includes(r.status))) return;
     const t = setTimeout(q.reload, 2000);

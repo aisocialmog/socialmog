@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import {
   BarChart3, Bell, Building2, Clapperboard, FileText, Handshake, HardDrive, LayoutDashboard, ListChecks, LogOut, Megaphone, Menu, Plus,
-  Settings as SettingsIcon, Users, Wallet, FileBarChart,
+  Settings as SettingsIcon, Sparkles, Users, Wallet, FileBarChart,
 } from 'lucide-react';
 import { can, ENTITY, INTERNAL_ROLES, ROLE_LABELS, type Cap } from '../shared/schema.ts';
 import { api, ThemeToggle, ArchiveButton, Async, Card, ConfirmHost, Details, EntityForm, fmtDateTime, MeContext, Modal, PageHead, REF_PATHS, Timeline, Activity, Toasts, useApi, useMe, type Me, type Row, Tabs, DemoTag } from './lib.tsx';
@@ -18,6 +18,7 @@ import { Analytics } from './pages/analytics.tsx';
 import { Reports } from './pages/reports.tsx';
 import { Settings } from './pages/settings.tsx';
 import { Portal } from './pages/portal.tsx';
+import { ChatGPT } from './pages/chatgpt.tsx';
 import './styles.css';
 
 const NAV: { to: string; label: string; icon: typeof Users; cap: Cap; notEditor?: boolean }[] = [
@@ -30,6 +31,7 @@ const NAV: { to: string; label: string; icon: typeof Users; cap: Cap; notEditor?
   { to: '/finance', label: 'Finance', icon: Wallet, cap: 'campaign_finance' },
   { to: '/analytics', label: 'Analytics', icon: BarChart3, cap: 'staff', notEditor: true },
   { to: '/reports', label: 'Reports', icon: FileBarChart, cap: 'staff', notEditor: true },
+  { to: '/chatgpt', label: 'ChatGPT analysis', icon: Sparkles, cap: 'staff', notEditor: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks, cap: 'staff' },
   { to: '/documents', label: 'Documents', icon: FileText, cap: 'staff', notEditor: true },
   { to: '/assets', label: 'Assets', icon: HardDrive, cap: 'staff', notEditor: true },
@@ -135,6 +137,7 @@ function Shell() {
             <Route path="/editors/:id" element={<EditorPage />} />
             <Route path="/analytics/*" element={<Analytics />} />
             <Route path="/reports/*" element={<Reports />} />
+            <Route path="/chatgpt/*" element={<ChatGPT />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/tasks/:id" element={<TaskPage />} />
             <Route path="/documents" element={<Documents />} />

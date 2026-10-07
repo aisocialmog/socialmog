@@ -11,6 +11,7 @@ import { financeRoutes } from './finance-routes.ts';
 import { analyticsRoutes } from './analytics.ts';
 import { reportRoutes } from './reports.ts';
 import { portalRoutes } from './portal.ts';
+import { chatgptRoutes } from './chatgpt.ts';
 import { retryJob } from './jobs.ts';
 import { removeDemo } from './seed.ts';
 
@@ -591,7 +592,7 @@ export function createApp(db: Db, opts: AppOptions) {
     res.json(Object.fromEntries(rows.map((r) => [r.key, JSON.parse(r.value)])));
   });
 
-  const SETTING_KEYS = ['timezone', 'recognition', 'analysis_schedule', 'agency', 'forecast_defaults'];
+  const SETTING_KEYS = ['timezone', 'recognition', 'analysis_schedule', 'agency', 'forecast_defaults', 'chatgpt_prep'];
   app.put('/api/settings/:key', (req, res) => {
     const u = requireCap(req, 'admin');
     const key = String(req.params.key);
@@ -663,6 +664,7 @@ export function createApp(db: Db, opts: AppOptions) {
   analyticsRoutes(app);
   reportRoutes(app, opts.dataDir);
   portalRoutes(app, opts.dataDir);
+  chatgptRoutes(app);
 
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found')));
   return app;

@@ -5,9 +5,10 @@ import { formatINR, formatNumberIN } from '../../shared/money.ts';
 import { barChart, SERIES_CSS, THEME_CSS } from '../../shared/charts.ts';
 import { CAMPAIGN_STAGES, humanize } from '../../shared/schema.ts';
 import {
-  Activity, api, ArchiveButton, Async, attempt, Badge, Card, Chart, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban, Modal, Money,
+  Activity, AnalyseButton, api, ArchiveButton, Async, attempt, Badge, Card, Chart, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban, Modal, Money,
   PageHead, Stat, Tabs, Timeline, useApi, useCan, useToday, type Row,
 } from '../lib.tsx';
+import { ImportedAnalyses } from './chatgpt.tsx';
 import { LinkedDocuments } from './influencers.tsx';
 
 export function Campaigns() {
@@ -20,7 +21,7 @@ export function Campaigns() {
   return (
     <div className="stack">
       <PageHead title="Campaigns" sub="Operational stage and financial closure are tracked separately"
-        actions={<><div className="seg">{['table', 'board', 'health'].map((v) => <button key={v} className={view === v ? 'on' : ''} onClick={() => setSp({ view: v })}>{humanize(v)}</button>)}</div>{canEdit && <button className="btn primary" onClick={() => setCreating(true)}>New campaign</button>}</>} />
+        actions={<><div className="seg">{['table', 'board', 'health'].map((v) => <button key={v} className={view === v ? 'on' : ''} onClick={() => setSp({ view: v })}>{humanize(v)}</button>)}</div><AnalyseButton type="campaign_performance" cap="campaigns" />{canEdit && <button className="btn primary" onClick={() => setCreating(true)}>New campaign</button>}</>} />
       {view === 'health' ? <Health /> : view === 'board' ? (
         <Async q={q}>{(d) => (
           <Kanban stages={CAMPAIGN_STAGES} items={d.rows} stageOf={(c) => c.stage} canMove={canEdit} onMove={async (c, stage) => {
@@ -74,7 +75,8 @@ export function CampaignPage() {
           <div className="stack">
             <PageHead title={<>{c.name} <DemoTag row={c} /></>} sub={<><Link to={`/brands/${c.brand_id}`}>{c.brand_id_label}</Link> · {humanize(c.billing_model)} · owner {c.owner_id_label ?? '—'} · {formatDate(c.start_date)} – {formatDate(c.end_date)}{c.deal_id && <> · from <Link to={`/deals/${c.deal_id}`}>deal</Link></>}</>}
               actions={<>{canEdit && <select className="input" style={{ width: 'auto' }} value={c.stage} aria-label="Stage" onChange={async (e) => { if (await attempt(() => api(`/api/e/campaigns/${c.id}`, { method: 'PATCH', body: { stage: e.target.value } }), 'Stage updated')) q.reload(); }}>{CAMPAIGN_STAGES.map((s) => <option key={s} value={s}>{humanize(s)}</option>)}</select>}
-                <Link className="btn" to={`/reports?type=campaign&campaign_id=${c.id}`}>Report</Link>
+                <Link className="btn" to={`/reports?type=campaign&campaign_ids=${c.id}`}>Report</Link>
+                <AnalyseButton type="campaign_performance" ids={[c.id]} cap="campaigns" />
                 {canEdit && <button className="btn" onClick={() => setModal('edit')}>Edit</button>}<ArchiveButton entity="campaigns" row={c} onDone={() => nav('/campaigns')} /></>} />
             <div className="row small" aria-label="Stage progress">{CAMPAIGN_STAGES.map((s, i) => <span key={s} className={`badge ${i < stageIdx ? 'good' : i === stageIdx ? 'info' : ''}`}>{humanize(s)}</span>)}</div>
             {f && (
@@ -95,7 +97,7 @@ export function CampaignPage() {
             <Tabs value={tab} onChange={setTab} tabs={[
               { key: 'overview', label: 'Overview' }, { key: 'roster', label: `Creators (${d.roster.length})` }, { key: 'deliverables', label: `Deliverables (${d.deliverables.length})` },
               { key: 'content', label: `Content (${d.tasks.length})` }, ...(f ? [{ key: 'finance', label: 'Finance' }] : []), { key: 'results', label: 'Results' },
-              { key: 'approvals', label: 'Approvals' }, { key: 'documents', label: 'Documents' }, { key: 'notes', label: 'Notes' }, { key: 'activity', label: 'Activity' },
+              { key: 'approvals', label: 'Approvals' }, { key: 'documents', label: 'Documents' }, { key: 'notes', label: 'Notes' }, { key: 'chatgpt', label: 'ChatGPT analyses' }, { key: 'activity', label: 'Activity' },
             ]} />
             {tab === 'overview' && (
               <div className="grid two">
@@ -146,6 +148,7 @@ export function CampaignPage() {
             )}
             {tab === 'documents' && <LinkedDocuments entity="campaigns" id={c.id} docs={d.documents} />}
             {tab === 'notes' && <Card><Timeline entity="campaigns" id={c.id} /></Card>}
+            {tab === 'chatgpt' && <ImportedAnalyses refKey={`campaigns:${c.id}`} />}
             {tab === 'activity' && <Card><Activity entity="campaigns" id={c.id} /></Card>}
             <Modal open={modal === 'edit'} onClose={() => setModal(null)} title="Edit campaign"><EntityForm entity="campaigns" record={c} onSaved={() => (setModal(null), q.reload())} /></Modal>
             <Modal open={modal === 'creator'} onClose={() => setModal(null)} title="Add creator to roster"><EntityForm entity="campaign_creators" initial={{ campaign_id: c.id }} onSaved={() => (setModal(null), q.reload(), invalidate('/api/finance'))} /></Modal>

@@ -5,7 +5,7 @@ import { dealEconomics, STAGE_PROBABILITY } from '../../shared/calc.ts';
 import { formatINR } from '../../shared/money.ts';
 import { DEAL_STAGES, humanize } from '../../shared/schema.ts';
 import {
-  Activity, api, ArchiveButton, Async, attempt, Badge, Card, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban, Modal, Money,
+  Activity, AnalyseButton, api, ArchiveButton, Async, attempt, Badge, Card, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban, Modal, Money,
   PageHead, Stat, Tabs, Timeline, toast, useApi, useCan, useToday, type Row,
 } from '../lib.tsx';
 import { LinkedDocuments, Shortlist } from './influencers.tsx';
@@ -45,7 +45,7 @@ export function BrandPage() {
         return (
           <div className="stack">
             <PageHead title={<>{b.name} <DemoTag row={b} /></>} sub={<><Badge value={b.status} /> {b.industry} {b.owner_id_label && `· owner ${b.owner_id_label}`} {b.website && <a href={b.website} target="_blank" rel="noreferrer">Website</a>} {b.instagram_url && <a href={b.instagram_url} target="_blank" rel="noreferrer">Instagram</a>}</>}
-              actions={canSales && <><button className="btn" onClick={() => setModal('deal')}>New deal</button><button className="btn" onClick={() => setModal('edit')}>Edit</button><ArchiveButton entity="brands" row={b} onDone={() => nav('/brands')} /></>} />
+              actions={canSales && <><AnalyseButton type="brand_proposal" ids={[b.id]} cap="sales" /><button className="btn" onClick={() => setModal('deal')}>New deal</button><button className="btn" onClick={() => setModal('edit')}>Edit</button><ArchiveButton entity="brands" row={b} onDone={() => nav('/brands')} /></>} />
             <div className="grid">
               <Stat label="Open deals" value={d.deals.filter((x: Row) => !['won', 'lost'].includes(x.stage)).length} />
               <Stat label="Campaigns" value={d.campaigns.length} />
@@ -165,6 +165,7 @@ export function DealPage() {
           <div className="stack">
             <PageHead title={<>{d.title} <DemoTag row={d} /></>} sub={<><Link to={`/brands/${d.brand_id}`}>{d.brand_id_label}</Link> · <Badge value={d.stage} /> · {humanize(d.billing_model)} model · owner {d.owner_id_label ?? '—'}</>}
               actions={<>
+                <AnalyseButton type="brand_proposal" ids={[d.brand_id]} cap="sales" />
                 {d.campaign_id ? <Link className="btn primary" to={`/campaigns/${d.campaign_id}`}>Open campaign</Link> : canConvert && d.stage !== 'lost' && (
                   <button className="btn primary" onClick={async () => {
                     const ok = await confirmAction({ title: 'Convert to campaign?', message: 'Creates the campaign with brand, brief, budget plan, confirmed creators (and their payables), deliverables and payment milestones from this deal. The deal is marked won.', confirm: 'Convert' });

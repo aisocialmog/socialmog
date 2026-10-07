@@ -195,6 +195,9 @@ function Automation() {
           <span className="small muted">{s.data?.timezone ?? 'Asia/Kolkata'} · analyses the previous Monday–Sunday · one run per week (duplicates prevented), up to 3 attempts, founder notified on failure</span>
         </div>
       </Card>
+      <Card title="Weekly ChatGPT analysis package" hint="Manual ChatGPT analysis: the package and prompt are prepared on the same schedule; running it in ChatGPT and importing the result stays with you.">
+        <label className="check"><input type="checkbox" checked={s.data?.chatgpt_prep?.enabled !== false} onChange={(e) => attempt(() => api('/api/settings/chatgpt_prep', { method: 'PUT', body: { value: { enabled: e.target.checked } } }), 'Saved').then(() => s.reload())} /> Prepare the weekly influencer package automatically and show an in-app reminder</label>
+      </Card>
       <Card title="Other scheduled jobs"><ul className="small"><li>Daily 08:00 — in-app reminders for urgent items (overdue payments, shortfalls, renewals)</li><li>Daily 02:00 — database backup kept for 14 days in the data folder</li><li>Mondays / 1st of month — report templates with a schedule</li></ul></Card>
       <Card title="Job history" flush>
         <Async q={jobs}>{(d) => <DataTable rows={d.rows} viewKey="jobs" columns={[

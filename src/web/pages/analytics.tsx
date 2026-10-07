@@ -5,7 +5,7 @@ import { addDays, formatDate, weekStart } from '../../shared/dates.ts';
 import { formatNumberIN } from '../../shared/money.ts';
 import { barChart, lineChart, SERIES_CSS, THEME_CSS } from '../../shared/charts.ts';
 import { humanize, PLATFORMS } from '../../shared/schema.ts';
-import { api, Async, attempt, Badge, Card, Chart, DataTable, Empty, fmtDateTime, Modal, PageHead, Stat, toast, useApi, useCan, useMe, useOptions, useToday, type Row } from '../lib.tsx';
+import { AnalyseButton, api, Async, attempt, Badge, Card, Chart, DataTable, Empty, fmtDateTime, Modal, PageHead, Stat, toast, useApi, useCan, useMe, useOptions, useToday, type Row } from '../lib.tsx';
 
 const SNAP_FIELDS = ['followers_start', 'followers_end', 'posts', 'views', 'reach', 'likes', 'comments', 'shares', 'saves', 'engagement_rate', 'profile_visits', 'website_clicks', 'avg_views', 'median_views', 'paid_views', 'paid_reach'];
 const val = (v: number | null | undefined, d = 0) => (v === null || v === undefined ? <span className="muted">Unavailable</span> : formatNumberIN(v, { decimals: d }));
@@ -36,7 +36,7 @@ function Overview() {
   return (
     <div className="stack">
       <PageHead title="Weekly influencer analysis" sub="Every Monday 9:00 IST (configurable) for the week that just ended. Metrics show their period, source and last update; missing data stays unavailable."
-        actions={canRun && <button className="btn primary" disabled={running} onClick={async () => {
+        actions={<><AnalyseButton type="influencer_growth" />{canRun && <button className="btn primary" disabled={running} onClick={async () => {
           setRunning(true);
           try {
             const r = await api('/api/analytics/run', { body: {} });
@@ -47,7 +47,7 @@ function Overview() {
           } finally {
             setRunning(false);
           }
-        }}>{running ? 'Running…' : 'Run analysis now'}</button>} />
+        }}>{running ? 'Running…' : 'Run analysis now'}</button>}</>} />
       <Async q={q}>
         {(d) => (
           <div className="stack">
@@ -121,7 +121,7 @@ function InfluencerAnalytics() {
         return (
           <div className="stack">
             <PageHead title={<>{d.influencer.name} — weekly analytics</>} sub={<><Link to={`/influencers/${d.influencer.id}`}>Profile</Link> · {d.connection ? <>Instagram <Badge value={d.connection.status} /> {d.connection.last_sync_at && `· last sync ${fmtDateTime(d.connection.last_sync_at)}`}</> : 'Manual / CSV data'}</>}
-              actions={<>{canEdit && <button className="btn" onClick={() => setModal('snapshot')}>Enter a week</button>}{canEdit && <button className="btn" onClick={() => setModal('post')}>Add post</button>}<button className="btn primary" disabled={busy} onClick={() => generate(addDays(weekStart(today), -7))}>{busy ? 'Analysing…' : 'Analyse last week'}</button></>} />
+              actions={<><AnalyseButton type="influencer_growth" ids={[d.influencer.id]} />{canEdit && <button className="btn" onClick={() => setModal('snapshot')}>Enter a week</button>}{canEdit && <button className="btn" onClick={() => setModal('post')}>Add post</button>}<button className="btn primary" disabled={busy} onClick={() => generate(addDays(weekStart(today), -7))}>{busy ? 'Analysing…' : 'Analyse last week'}</button></>} />
             {snaps.length > 1 ? (
               <div className="grid two">
                 <Card title="Followers at week end"><Chart label="Followers" svg={(w) => lineChart({ width: w,  labels, series: [{ name: 'Followers', color: SERIES_CSS[0], values: snaps.map((s: Row) => s.metrics.followers_end ?? null) }], yFormat: (n) => formatNumberIN(n, { compact: true }), interactive: true, theme: THEME_CSS, height: 200 })} table={{ columns: ['Week', 'Followers', 'Source'], rows: snaps.map((s: Row) => [formatDate(s.period_start), s.metrics.followers_end ?? 'Unavailable', s.source]) }} /></Card>

@@ -4,7 +4,8 @@ import { formatDate } from '../../shared/dates.ts';
 import { formatINR, formatNumberIN } from '../../shared/money.ts';
 import { lineChart, SERIES_CSS, THEME_CSS } from '../../shared/charts.ts';
 import { humanize } from '../../shared/schema.ts';
-import { Async, Badge, Card, Chart, Empty, Modal, Money, PageHead, Stat, useApi, useCan, useMe, type Row } from '../lib.tsx';
+import { AnalyseButton, Async, Badge, Card, Chart, Empty, Modal, Money, PageHead, Stat, useApi, useCan, useMe, type Row } from '../lib.tsx';
+import { ChatGPTCard } from './chatgpt.tsx';
 
 type Drill = { title: string; note?: ReactNode; rows: { label: ReactNode; sub?: ReactNode; amount?: number; link?: string }[] } | null;
 
@@ -15,11 +16,12 @@ export function Overview() {
   const hour = Number(new Intl.DateTimeFormat('en-IN', { hour: 'numeric', hour12: false, timeZone: me.timezone }).format(new Date()));
   return (
     <div className="stack">
-      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${me.user.name.split(' ')[0]}`} sub={q.data ? `${formatDate(q.data.today)} · every figure opens the records behind it` : undefined} />
+      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${me.user.name.split(' ')[0]}`} sub={q.data ? `${formatDate(q.data.today)} · every figure opens the records behind it` : undefined} actions={<AnalyseButton type="founder_review" cap="admin" />} />
       <Async q={q}>
         {(d) => (
           <div className="stack">
             {d.finance && <FinanceBlock f={d.finance} open={setDrill} />}
+            <ChatGPTCard c={d.chatgpt} />
             <div className="grid two">
               <Attention items={d.attention} />
               <div className="stack">

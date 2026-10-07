@@ -5,7 +5,7 @@ import { formatDate } from '../../shared/dates.ts';
 import { formatINR } from '../../shared/money.ts';
 import { CONTENT_STAGES, humanize } from '../../shared/schema.ts';
 import {
-  Activity, api, ArchiveButton, Async, attempt, Badge, Calendar, Card, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban,
+  Activity, AnalyseButton, api, ArchiveButton, Async, attempt, Badge, Calendar, Card, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Kanban,
   Modal, Money, PageHead, Stat, Tabs, Timeline, toast, useApi, useCan, useMe, useToday, type Row,
 } from '../lib.tsx';
 import { PayableTable } from './finance.tsx';
@@ -80,6 +80,7 @@ export function ContentTaskPage() {
                 {editor && EDITOR_STAGES.includes(t.stage) && t.stage !== 'internal_review' && <button className="btn primary" onClick={() => patch({ stage: 'internal_review' }, 'Submitted for review')}>Submit for review</button>}
                 {editor && t.stage === 'changes_requested' && <button className="btn primary" onClick={() => patch({ stage: 'editing' }, 'Back in editing')}>Start changes</button>}
                 {canReview && <ReviewActions t={t} onDone={q.reload} />}
+                {!editor && <AnalyseButton type="content_planning" ids={[t.id]} cap="campaigns" />}
                 {canEdit && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
                 {canEdit && <ArchiveButton entity="content_tasks" row={t} onDone={() => nav('/content')} />}
               </>} />
@@ -248,7 +249,7 @@ export function Editors() {
   const w = useApi<{ rows: Row[] }>('/api/editors-workload');
   return (
     <div className="stack">
-      <PageHead title="Editors" sub="Skills, availability, workload and turnaround" actions={<Link className="btn" to="/content">Content board</Link>} />
+      <PageHead title="Editors" sub="Skills, availability, workload and turnaround" actions={<><AnalyseButton type="editor_workload" cap="campaigns" /><Link className="btn" to="/content">Content board</Link></>} />
       <Async q={w}>{(d) => (
         <div className="grid wide">{d.rows.map((e) => (
           <Link key={e.id} to={`/editors/${e.id}`} className="card stack tight" style={{ color: 'inherit', textDecoration: 'none' }}>
@@ -278,7 +279,7 @@ export function EditorPage() {
       const mine = (tasks.data?.rows ?? []).filter((t) => t.editor_id === e.id);
       return (
         <div className="stack">
-          <PageHead title={<>{e.name} <DemoTag row={e} /></>} sub={<><Badge value={e.availability} /> {(e.skills ?? []).join(', ')} {e.portfolio_url && <a href={e.portfolio_url} target="_blank" rel="noreferrer">Portfolio</a>}</>} actions={canEdit && <><button className="btn" onClick={() => setEditing(true)}>Edit</button><ArchiveButton entity="editors" row={e} onDone={() => nav('/editors')} /></>} />
+          <PageHead title={<>{e.name} <DemoTag row={e} /></>} sub={<><Badge value={e.availability} /> {(e.skills ?? []).join(', ')} {e.portfolio_url && <a href={e.portfolio_url} target="_blank" rel="noreferrer">Portfolio</a>}</>} actions={<><AnalyseButton type="editor_workload" ids={[e.id]} cap="campaigns" />{canEdit && <><button className="btn" onClick={() => setEditing(true)}>Edit</button><ArchiveButton entity="editors" row={e} onDone={() => nav('/editors')} /></>}</>} />
           <div className="grid">
             <Stat label="Open tasks" value={mine.filter((t) => !['approved', 'delivered'].includes(t.stage)).length} />
             <Stat label="Delivered" value={mine.filter((t) => t.stage === 'delivered').length} />

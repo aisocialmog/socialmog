@@ -29,7 +29,7 @@ export const METRICS: { key: string; label: string }[] = [
   { key: 'website_clicks', label: 'Website clicks' },
   { key: 'paid_views', label: 'Paid views' },
 ];
-const INPUT_KEYS = ['followers_start', 'followers_end', 'posts', 'views', 'reach', 'likes', 'comments', 'shares', 'saves', 'engagement_rate', 'profile_visits', 'website_clicks', 'avg_views', 'median_views', 'paid_views', 'paid_reach'];
+export const INPUT_KEYS = ['followers_start', 'followers_end', 'posts', 'views', 'reach', 'likes', 'comments', 'shares', 'saves', 'engagement_rate', 'profile_visits', 'website_clicks', 'avg_views', 'median_views', 'paid_views', 'paid_reach'];
 
 const num = (v: unknown): number | null => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 
@@ -64,11 +64,12 @@ export function upsertSnapshot(db: Db, user: User | null, v: { influencer_id: nu
   const existing = get(db, 'SELECT * FROM analytics_snapshots WHERE influencer_id = ? AND platform = ? AND period_start = ?', v.influencer_id, v.platform, start);
   if (existing) {
     // Keep values that this update does not provide (e.g. manual reach added to an API snapshot).
-    const prev = JSON.parse(existing.metrics ?? '{}');
+    // An archived snapshot (e.g. from an undone import) contributes nothing.
+    const prev = existing.archived_at ? {} : JSON.parse(existing.metrics ?? '{}');
     const merged = Object.fromEntries(INPUT_KEYS.map((k) => [k, metrics[k] ?? prev[k] ?? null]));
-    const sources = new Set(String(existing.source ?? '').split(' + ').filter(Boolean));
+    const sources = new Set(existing.archived_at ? [] : String(existing.source ?? '').split(' + ').filter(Boolean));
     sources.add(v.source);
-    update(db, 'analytics_snapshots', existing.id, { metrics: merged, source: [...sources].join(' + '), notes: v.notes ?? existing.notes });
+    update(db, 'analytics_snapshots', existing.id, { metrics: merged, source: [...sources].join(' + '), notes: v.notes ?? existing.notes, archived_at: null });
     audit(db, user?.id ?? null, 'update', 'analytics_snapshots', existing.id, JSON.parse(existing.metrics ?? '{}'), merged);
     return existing.id;
   }
@@ -152,7 +153,7 @@ export function analyseWeek(db: Db, influencerId: number, periodStart: string): 
   const views = metrics.find((m) => m.key === 'views')!;
   const fol = metrics.find((m) => m.key === 'follower_change')!;
   const eng = metrics.find((m) => m.key === 'engagement_rate')!;
-  if (views.current !== null) observations.push(`Views ${formatNumberIN(views.current)} (${pct(views.change_pct)} vs last week, ${pct(views.change_vs_baseline_pct)} vs ${views.baseline_weeks}-week average).`);
+  if (views.current !== null) observations.push(`Views ${formatNumberIN(views.current)} (${views.previous === null ? 'no previous week recorded' : `${pct(views.change_pct)} vs last week`}${views.baseline_weeks ? `, ${pct(views.change_vs_baseline_pct)} vs ${views.baseline_weeks}-week average` : ''}).`);
   if (fol.current !== null) observations.push(`Followers ${fol.current >= 0 ? 'grew' : 'fell'} by ${formatNumberIN(Math.abs(fol.current))} to ${formatNumberIN(metrics[0].current)}.`);
   if (eng.current !== null) observations.push(`Engagement rate ${eng.current}% (${pct(eng.change_vs_baseline_pct)} vs baseline).`);
   if (ranked.length >= 2) observations.push(`Strongest post had ${(ranked[0].metrics.views / Math.max(1, ranked[ranked.length - 1].metrics.views)).toFixed(1)}× the views of the weakest.`);
@@ -518,7 +519,7 @@ export function analyticsRoutes(app: Express) {
     const t = today(db);
     const lastWeek = addDays(weekStart(t), -7);
     const rows = all(db, `SELECT id, name, handle, relationship FROM influencers WHERE archived_at IS NULL AND relationship <> 'inactive' ORDER BY name`).map((i) => {
-      const latest = get(db, `SELECT period_start, source, updated_at, created_at, metrics FROM analytics_snapshots WHERE influencer_id = ? ORDER BY period_start DESC LIMIT 1`, i.id);
+      const latest = get(db, `SELECT period_start, source, updated_at, created_at, metrics FROM analytics_snapshots WHERE influencer_id = ? AND archived_at IS NULL ORDER BY period_start DESC LIMIT 1`, i.id);
       const report = get(db, `SELECT id, period_start, version, ai_status, created_at FROM weekly_reports WHERE influencer_id = ? ORDER BY period_start DESC, version DESC LIMIT 1`, i.id);
       const conn = get(db, `SELECT status, last_sync_at, last_sync_status FROM social_accounts WHERE influencer_id = ? AND platform = 'instagram'`, i.id);
       return { ...i, latest: latest ? { ...latest, metrics: enrich(JSON.parse(latest.metrics ?? '{}')) } : null, report, connection: conn ?? null, missing_last_week: !latest || latest.period_start < lastWeek };

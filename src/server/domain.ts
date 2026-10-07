@@ -11,6 +11,7 @@ import { all, audit, decode, get, HttpError, insert, run, tx, update, type Db, t
 import { attachLabels, founders, notify, requireCap, requireInternal, requireUser, scopeFor, serialize, type AppOptions } from './app.ts';
 import { campaignFinancials, cashPosition, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, today } from './finance.ts';
 import { forecast, SCENARIOS } from './forecast.ts';
+import { chatgptDashboard } from './chatgpt.ts';
 
 // ---------------------------------------------------------------- write hooks
 
@@ -442,7 +443,7 @@ export function editorWorkload(db: Db, t: string): Row[] {
 // ---------------------------------------------------------------- influencer trend (from weekly snapshots)
 
 export function influencerTrends(db: Db): Row[] {
-  const rows = all(db, `SELECT s.*, i.name FROM analytics_snapshots s JOIN influencers i ON i.id = s.influencer_id WHERE i.archived_at IS NULL ORDER BY s.period_start DESC`);
+  const rows = all(db, `SELECT s.*, i.name FROM analytics_snapshots s JOIN influencers i ON i.id = s.influencer_id WHERE i.archived_at IS NULL AND s.archived_at IS NULL ORDER BY s.period_start DESC`);
   const byInf = new Map<number, Row[]>();
   for (const r of rows) {
     const key = r.influencer_id;
@@ -542,6 +543,9 @@ export function dashboard(db: Db, user: User) {
   for (const j of all(db, `SELECT * FROM jobs WHERE status = 'failed' AND finished_at >= ?`, addDays(t, -7))) add('high', 'job_failed', `Automation failed: ${j.kind.replace(/_/g, ' ')}`, j.last_error ?? '', '/settings/automation');
   for (const s of all(db, `SELECT a.id, a.username, a.status, i.name FROM social_accounts a LEFT JOIN influencers i ON i.id = a.influencer_id WHERE a.status IN ('expired','error')`)) add('medium', 'connection', `Reconnect Instagram: ${s.name ?? s.username}`, `Status: ${s.status}`, '/analytics/connections');
 
+  const chatgpt = chatgptDashboard(db, user);
+  if (chatgpt?.weekly && chatgpt.weekly.status !== 'imported') add('low', 'chatgpt', 'Weekly ChatGPT analysis not imported yet', `${chatgpt.label}: package for ${formatDate(chatgpt.weekly.period.from)} – ${formatDate(chatgpt.weekly.period.to)} is ready`, `/chatgpt/exports/${chatgpt.weekly.export_key}`);
+
   const order = { high: 0, medium: 1, low: 2 };
   attention.sort((a, b) => order[a.severity as 'high'] - order[b.severity as 'high'] || (b.amount ?? 0) - (a.amount ?? 0));
 
@@ -565,6 +569,7 @@ export function dashboard(db: Db, user: User) {
     influencers: influencerTrends(db).filter((x) => x.direction === 'improving' || x.direction === 'declining'),
     editors: editorWorkload(db, t),
     attention,
+    chatgpt,
   };
 }
 
@@ -650,7 +655,7 @@ export function domainRoutes(app: Express, _opts: AppOptions) {
       obligations: cf ? listObligations(db, t, { campaign_id: id }) : null,
       earmarks: can(u.role, 'finance') ? all(db, `SELECT * FROM earmarks WHERE status = 'active' AND (campaign_id = ? OR obligation_id IN (SELECT id FROM obligations WHERE campaign_id = ?))`, id, id) : null,
       documents: all(db, `SELECT id, title, kind, url, file, visibility FROM documents WHERE archived_at IS NULL AND entity_type = 'campaigns' AND entity_id = ?`, id),
-      posts: all(db, `SELECT p.*, i.name AS influencer_name FROM posts p JOIN influencers i ON i.id = p.influencer_id WHERE p.campaign_id = ?`, id).map((r) => decode('posts', r)),
+      posts: all(db, `SELECT p.*, i.name AS influencer_name FROM posts p JOIN influencers i ON i.id = p.influencer_id WHERE p.campaign_id = ? AND p.archived_at IS NULL`, id).map((r) => decode('posts', r)),
     });
   });
 

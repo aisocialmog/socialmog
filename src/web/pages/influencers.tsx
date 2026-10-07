@@ -5,10 +5,11 @@ import { formatDate } from '../../shared/dates.ts';
 import { formatINR, formatNumberIN } from '../../shared/money.ts';
 import { can, ENTITY, fieldLabel, humanize, PLATFORMS, visibleFields } from '../../shared/schema.ts';
 import {
-  Activity, api, ArchiveButton, Async, attempt, Badge, Card, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Modal, Money, MoneyField,
+  Activity, AnalyseButton, api, ArchiveButton, Async, attempt, Badge, Card, DataTable, DemoTag, Details, Empty, EntityForm, EntityTable, invalidate, Modal, Money, MoneyField,
   PageHead, Stat, Tabs, Timeline, toast, useApi, useCan, useMe, useOptions, type Row,
 } from '../lib.tsx';
 import { PayableTable } from './finance.tsx';
+import { ImportedAnalyses } from './chatgpt.tsx';
 
 export function PlatformLinks({ platforms }: { platforms: Row[] | null }) {
   if (!platforms?.length) return <span className="muted">—</span>;
@@ -28,7 +29,7 @@ export function Influencers() {
   const [exporting, setExporting] = useState(false);
   return (
     <div className="stack">
-      <PageHead title="Influencer roster" sub="Creators we manage, work with or are scouting" actions={<><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
+      <PageHead title="Influencer roster" sub="Creators we manage, work with or are scouting" actions={<><AnalyseButton type="influencer_growth" /><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
       <EntityTable entity="influencers" overrides={{
         name: { render: (r) => <span className="row nowrap-row"><Avatar r={r} /><span><strong>{r.name}</strong> <DemoTag row={r} /><div className="small muted">{r.handle}</div></span></span> },
         platforms: { hidden: false, label: 'Platforms', render: (r) => <PlatformLinks platforms={r.platforms} />, value: (r) => Math.max(0, ...(r.platforms ?? []).map((p: Row) => p.followers ?? 0)) },
@@ -159,6 +160,7 @@ export function InfluencerPage() {
               </div>
               <div className="row">
                 <Link className="btn" to={`/analytics/influencer/${r.id}`}>Weekly analysis</Link>
+                <AnalyseButton type="influencer_growth" ids={[r.id]} />
                 {canEdit && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
                 <ArchiveButton entity="influencers" row={r} onDone={() => nav('/influencers')} />
               </div>
@@ -172,7 +174,7 @@ export function InfluencerPage() {
             </div>
             <Tabs value={tab} onChange={setTab} tabs={[
               { key: 'profile', label: 'Profile' }, { key: 'platforms', label: 'Platforms & rates' }, { key: 'work', label: 'Deals & campaigns' },
-              ...(d.payments ? [{ key: 'payments', label: 'Payments' }] : []), { key: 'notes', label: 'Notes & timeline' }, { key: 'documents', label: 'Documents' }, { key: 'activity', label: 'Activity' },
+              ...(d.payments ? [{ key: 'payments', label: 'Payments' }] : []), { key: 'notes', label: 'Notes & timeline' }, { key: 'documents', label: 'Documents' }, { key: 'chatgpt', label: 'ChatGPT analyses' }, { key: 'activity', label: 'Activity' },
             ]} />
             {tab === 'profile' && (
               <div className="grid two">
@@ -231,6 +233,7 @@ export function InfluencerPage() {
             )}
             {tab === 'notes' && <Card><Timeline entity="influencers" id={r.id} /></Card>}
             {tab === 'documents' && <LinkedDocuments entity="influencers" id={r.id} docs={d.documents} />}
+            {tab === 'chatgpt' && <ImportedAnalyses refKey={`influencers:${r.id}`} />}
             {tab === 'activity' && <Card><Activity entity="influencers" id={r.id} /></Card>}
             <Modal open={editing} onClose={() => setEditing(false)} title="Edit influencer"><EntityForm entity="influencers" record={r} onSaved={() => (setEditing(false), q.reload())} /></Modal>
           </div>

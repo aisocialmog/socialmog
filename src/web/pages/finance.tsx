@@ -7,7 +7,7 @@ import { formatINR, paiseToRupeesString } from '../../shared/money.ts';
 import { lineChart, barChart, SERIES_CSS, THEME_CSS } from '../../shared/charts.ts';
 import { can, humanize, TXN_CATEGORIES } from '../../shared/schema.ts';
 import {
-  api, ApiError, ArchiveButton, Async, attempt, Badge, Calendar, Card, Chart, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm,
+  AnalyseButton, api, ApiError, ArchiveButton, Async, attempt, Badge, Calendar, Card, Chart, confirmAction, DataTable, DemoTag, Details, Empty, EntityForm,
   Gate, invalidate, Modal, Money, MoneyField, PageHead, Stat, Timeline, toast, Activity, useApi, useCan, useIdempotencyKey, useMe, useOptions, useToday, type Col, type Row,
 } from '../lib.tsx';
 
@@ -61,7 +61,7 @@ function Position() {
   const [modal, setModal] = useState<null | 'in' | 'out' | 'transfer'>(null);
   return (
     <div className="stack">
-      <PageHead title="Cash position" sub="Actual money, what is committed against it, and what is still free" actions={<MoneyActions onOpen={setModal} />} />
+      <PageHead title="Cash position" sub="Actual money, what is committed against it, and what is still free" actions={<><AnalyseButton type="finance_summary" cap="finance" period="this_month" /><MoneyActions onOpen={setModal} /></>} />
       <Async q={q}>
         {(p) => (
           <div className="stack">

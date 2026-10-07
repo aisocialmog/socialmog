@@ -19,6 +19,7 @@ import { forecast, SCENARIOS } from './forecast.ts';
 import { campaignHealth, dashboard, editorWorkload, influencerTrends } from './domain.ts';
 import { analyseWeek, enrich } from './analytics.ts';
 import { enqueue, onTick, registerJob, runDueJobs } from './jobs.ts';
+import { canUse, TYPES as AI_TYPES } from './chatgpt.ts';
 
 const require = createRequire(import.meta.url);
 const PdfPrinter = require('pdfmake');
@@ -107,15 +108,98 @@ export async function renderPdf(b: Built, meta: { audience: string; generatedAt:
 
 // ---------------------------------------------------------------- report definitions
 
-interface ReportDef { label: string; internalCap: Cap; externalCap?: Cap; sections: string[]; build: (c: Ctx) => Built }
+interface AiLink { types: string[]; ref?: (c: Ctx) => string | null; explicitOnly?: boolean }
+interface ReportDef { label: string; internalCap: Cap; externalCap?: Cap; sections: string[]; ai?: AiLink; build: (c: Ctx) => Built }
+
+// ---------------------------------------------------------------- imported ChatGPT commentary
+
+/** The analysis to quote: the one chosen (params.analysis_id) or the latest matching one for the period. External reports only use analyses marked shareable. */
+export function analysisFor(db: Db, c: Pick<Ctx, 'params' | 'audience' | 'user' | 'from' | 'to'>, ai: AiLink, ref: string | null): Row | null {
+  const id = Number(c.params.analysis_id);
+  const raw = id
+    ? get(db, `SELECT * FROM ai_analyses WHERE id = ? AND status = 'active'`, id)
+    : ai.explicitOnly
+      ? null
+      : get(db, `SELECT * FROM ai_analyses WHERE status = 'active' AND analysis_type IN (${ai.types.map(() => '?').join(',')}) ${ref ? 'AND records LIKE ?' : ''} ${c.audience === 'external' ? 'AND shareable = 1' : ''} AND period_start <= ? AND period_end >= ? ORDER BY id DESC LIMIT 1`, ...ai.types, ...(ref ? [`%"${ref}"%`] : []), c.to, c.from);
+  if (!raw) {
+    if (id) throw new HttpError(400, 'That ChatGPT analysis was not found or has been undone');
+    return null;
+  }
+  if (c.audience === 'external' && !raw.shareable) throw new HttpError(400, 'Mark the ChatGPT analysis as shareable before using it in an external report');
+  if (c.user && !canUse(c.user, raw.analysis_type)) throw new HttpError(403, 'You cannot use that ChatGPT analysis');
+  return decode('ai_analyses', raw)!;
+}
+
+/** mode: 'all' (whole analysis, or one record + general items when ref is set), 'part' (only items for ref), 'general' (only items without a record). */
+function aiCommentary(c: Ctx, a: Row, ref: string | null, mode: 'all' | 'part' | 'general' = 'all'): Content[] {
+  const part = mode === 'part';
+  const mine = (x: Row) => (part ? x.record === ref : mode === 'general' ? !x.record : !ref || !x.record || x.record === ref);
+  const obs = (a.observations ?? []).filter(mine);
+  const recs = (a.recommendations ?? []).filter(mine);
+  const calcs = (a.derived ?? []).filter(mine);
+  const ext = c.audience === 'external';
+  const label = AI_TYPES[a.analysis_type]?.label ?? a.analysis_type;
+  const body: Content[] = [
+    ...(part ? [] : [p(a.summary)]),
+    ...(obs.some((x: Row) => x.type === 'observed') ? [p({ text: 'Observed (ChatGPT, from the data provided)', bold: true }), bullets(obs.filter((x: Row) => x.type === 'observed').map((x: Row) => `${x.text}${x.evidence ? ` — ${x.evidence}` : ''}`))] : []),
+    ...(obs.some((x: Row) => x.type === 'hypothesis') ? [p({ text: 'Hypotheses (not proven)', bold: true }), bullets(obs.filter((x: Row) => x.type === 'hypothesis').map((x: Row) => x.text))] : []),
+    ...(recs.length ? [p({ text: 'Recommendations', bold: true }), { ol: recs.map((r: Row) => `${r.text}${r.rationale ? ` — ${r.rationale}` : ''}${r.priority && r.priority !== 'normal' ? ` [${r.priority}]` : ''}`), margin: [0, 0, 0, 8] }] : []),
+    ...(!ext && calcs.length ? [p({ text: 'Calculations made by ChatGPT', bold: true }), bullets(calcs.map((x: Row) => `${x.name}: ${x.value ?? 'unavailable'}${x.unit ? ` ${x.unit}` : ''} (${x.formula})`))] : []),
+    ...(!part && !ext && (a.connector ?? []).length ? [p({ text: 'Connector data', bold: true }), bullets((a.connector as Row[]).map((m) => `${m.username ?? m.record ?? 'Account'} · ${m.source} · ${m.status}${m.retrieved_at ? ` · retrieved ${formatDateTime(m.retrieved_at)}` : ''} — user-imported through ChatGPT, not independently verified by Socialmog HQ`))] : []),
+    ...(!part && (a.limitations ?? []).length + (a.missing ?? []).length ? [p({ text: 'Limitations & missing data', bold: true }), bullets([...(a.limitations ?? []), ...(a.missing ?? []).map((m: Row) => `${m.item}: ${m.reason}`)])] : []),
+  ];
+  if (part && body.length === 0) return [];
+  return [
+    part ? p({ text: 'ChatGPT commentary', bold: true, color: '#9a3412' }) : h2('ChatGPT commentary'),
+    { table: { widths: ['*'], body: [[{ stack: [
+      { text: 'Imported analysis — not calculated by Socialmog HQ', bold: true, color: '#9a3412', fontSize: 8.5 },
+      { text: `${LABEL_AI}: ${label}, ${formatPeriod(a.period_start, a.period_end)}, imported ${formatDate(a.created_at)}. Figures elsewhere in this report are calculated by Socialmog HQ from stored records; any numbers quoted here are ChatGPT's.`, fontSize: 7.5, color: MUTED, margin: [0, 2, 0, 6] },
+      ...body,
+    ], fillColor: '#fff7ed', margin: [8, 8, 8, 4] }]] }, layout: 'noBorders', margin: [0, 4, 0, 10] },
+  ];
+}
+const LABEL_AI = 'Manual ChatGPT analysis';
+
+/** Lets single-record reports cover several records (one section per record, page break between). */
+function many(label: string, idsKey: string, idKey: string, prefix: string, one: (c: Ctx) => Built, ai: AiLink): (c: Ctx) => Built {
+  return (c) => {
+    const ids: number[] = Array.isArray(c.params[idsKey]) ? [...new Set<number>(c.params[idsKey].map(Number))] : [];
+    if (ids.length <= 1) return one(ids.length ? { ...c, params: { ...c.params, [idKey]: ids[0] } } : c);
+    const analysis = c.sections('chatgpt') ? analysisFor(c.db, c, ai, null) : null;
+    const parts = ids.map((id) => {
+      const b = one({ ...c, params: { ...c.params, [idKey]: id } });
+      return { ...b, content: [...b.content, ...(analysis ? aiCommentary(c, analysis, `${prefix}:${id}`, 'part') : [])] };
+    });
+    const recipients = [...new Set(parts.map((x) => x.recipient))];
+    return {
+      title: `${label} — ${parts.length} ${prefix === 'influencers' ? 'creators' : 'campaigns'}`,
+      subtitle: parts.map((x) => x.title.split(' — ').slice(1).join(' — ')).join(' · '),
+      recipient: recipients.length === 1 ? recipients[0] : undefined,
+      summary: parts.map((x) => `${x.title.split(' — ').slice(1).join(' — ')}: ${x.summary[0] ?? ''}`),
+      content: parts.flatMap((x, i) => [{ text: x.title, style: 'h1', fontSize: 15, ...(i ? { pageBreak: 'before' } : {}) }, { ul: x.summary, margin: [0, 0, 0, 6] }, ...x.content]),
+      csv: parts.flatMap((x) => x.csv.map((t) => ({ ...t, name: `${x.title} — ${t.name}` }))),
+      data: { parts: parts.map((x) => x.data) },
+    };
+  };
+}
 
 const fyOrParams = (c: Ctx) => formatPeriod(c.from, c.to);
+
+/** The single record a report is about (null when it covers several). */
+const oneRef = (entity: string, idKey: string, idsKey: string) => (c: Ctx) => {
+  const ids = Array.isArray(c.params[idsKey]) ? [...new Set(c.params[idsKey].map(Number))] : [];
+  const id = ids.length > 1 ? null : ids.length ? ids[0] : c.params[idKey] ? Number(c.params[idKey]) : null;
+  return id ? `${entity}:${id}` : null;
+};
+const CAMPAIGN_AI: AiLink = { types: ['campaign_performance'], ref: oneRef('campaigns', 'campaign_id', 'campaign_ids') };
+const GROWTH_AI: AiLink = { types: ['influencer_growth'], ref: oneRef('influencers', 'influencer_id', 'influencer_ids') };
 
 export const REPORTS: Record<string, ReportDef> = {
   finance: {
     label: 'Finance report',
     internalCap: 'finance',
-    sections: ['cash', 'receivables', 'payables', 'campaigns', 'earnings', 'forecast'],
+    sections: ['cash', 'receivables', 'payables', 'campaigns', 'earnings', 'forecast', 'chatgpt'],
+    ai: { types: ['finance_summary'] },
     build: (c) => {
       const { db } = c;
       const opening = accountBalances(db, addDays(c.from, -1)).filter((a) => a.active);
@@ -195,7 +279,8 @@ export const REPORTS: Record<string, ReportDef> = {
   founder: {
     label: 'Founder report',
     internalCap: 'finance',
-    sections: ['finance', 'campaigns', 'influencers', 'pipeline', 'editors', 'priorities'],
+    sections: ['finance', 'campaigns', 'influencers', 'pipeline', 'editors', 'priorities', 'chatgpt'],
+    ai: { types: ['founder_review'] },
     build: (c) => {
       const { db } = c;
       const d = dashboard(db, c.user ?? (get(db, `SELECT id, name, email, role, editor_id, influencer_id, brand_id FROM users WHERE role = 'founder' LIMIT 1`) as User));
@@ -227,8 +312,9 @@ export const REPORTS: Record<string, ReportDef> = {
     label: 'Campaign report',
     internalCap: 'campaign_finance',
     externalCap: 'campaigns',
-    sections: ['overview', 'roster', 'deliverables', 'results', 'costs', 'lessons'],
-    build: (c) => {
+    sections: ['overview', 'roster', 'deliverables', 'results', 'costs', 'lessons', 'chatgpt'],
+    ai: CAMPAIGN_AI,
+    build: many('Campaign report', 'campaign_ids', 'campaign_id', 'campaigns', (c) => {
       const { db } = c;
       const camp = decode('campaigns', get(db, `SELECT c.*, b.name AS brand_name FROM campaigns c JOIN brands b ON b.id = c.brand_id WHERE c.id = ?`, Number(c.params.campaign_id)));
       if (!camp) throw new HttpError(400, 'Choose a campaign');
@@ -273,15 +359,16 @@ export const REPORTS: Record<string, ReportDef> = {
         csv: [{ name: 'Deliverables', columns: [{ label: 'Deliverable', key: 'title' }, { label: 'Creator', key: 'creator' }, { label: 'Status', key: 'status' }, { label: 'Due', key: 'due_date' }, { label: 'Published', key: 'publish_date' }, { label: 'Link', key: 'live_url' }, { label: 'Views', key: 'views' }], rows: dels.map((x) => ({ ...x, views: x.metrics?.views ?? null })) }],
         data: { campaign: { id: camp.id, name: camp.name }, deliverables: dels.length, finance: ext ? null : f },
       };
-    },
+    }, CAMPAIGN_AI),
   },
 
   influencer_growth: {
     label: 'Influencer growth report',
     internalCap: 'staff',
     externalCap: 'staff',
-    sections: ['profile', 'metrics', 'content', 'findings', 'history'],
-    build: (c) => {
+    sections: ['profile', 'metrics', 'content', 'findings', 'history', 'chatgpt'],
+    ai: GROWTH_AI,
+    build: many('Influencer growth report', 'influencer_ids', 'influencer_id', 'influencers', (c) => {
       const { db } = c;
       const inf = decode('influencers', get(db, 'SELECT * FROM influencers WHERE id = ?', Number(c.params.influencer_id)));
       if (!inf) throw new HttpError(400, 'Choose a creator');
@@ -289,7 +376,7 @@ export const REPORTS: Record<string, ReportDef> = {
       const a = analyseWeek(db, inf.id, get(db, `SELECT period_start FROM analytics_snapshots WHERE influencer_id = ? AND period_start <= ? ORDER BY period_start DESC LIMIT 1`, inf.id, week)?.period_start ?? week);
       const report = get(db, `SELECT * FROM weekly_reports WHERE influencer_id = ? AND period_start = ? ORDER BY version DESC LIMIT 1`, inf.id, a.period.start);
       const stored = report ? JSON.parse(report.content) : null;
-      const hist = all(db, `SELECT * FROM analytics_snapshots WHERE influencer_id = ? AND platform = ? AND period_start BETWEEN ? AND ? ORDER BY period_start`, inf.id, a.platform, c.from, c.to).map((s) => ({ ...s, metrics: enrich(JSON.parse(s.metrics ?? '{}')) }));
+      const hist = all(db, `SELECT * FROM analytics_snapshots WHERE influencer_id = ? AND platform = ? AND archived_at IS NULL AND period_start BETWEEN ? AND ? ORDER BY period_start`, inf.id, a.platform, c.from, c.to).map((s) => ({ ...s, metrics: enrich(JSON.parse(s.metrics ?? '{}')) }));
       const content: Content[] = [];
       if (c.sections('profile')) content.push(h2('Creator profile'), kv([['Creator', `${inf.name} (${inf.handle ?? '—'})`], ['Niches', (inf.niches ?? []).join(', ') || '—'], ['Location', inf.city ?? '—']]), table([{ label: 'Platform', key: 'pl' }, { label: 'Link', key: 'handle', link: 'url' }, { label: 'Followers', key: 'followers', num: true }, { label: 'Source / as of', key: 'src' }], (inf.platforms ?? []).map((pl: Row) => ({ ...pl, pl: humanize(pl.platform), src: `${pl.source ?? 'Unknown'}${pl.updated_at ? `, ${formatDate(pl.updated_at)}` : ''}` }))));
       if (c.sections('metrics')) content.push(h2(`Week of ${formatDate(a.period.start)} — ${a.platform}`), muted(`Source: ${a.source ?? 'no data recorded'}${a.updated_at ? ` · last updated ${formatDateTime(a.updated_at)}` : ''}. "Unavailable" means the metric was not provided; nothing is estimated.`),
@@ -317,7 +404,7 @@ export const REPORTS: Record<string, ReportDef> = {
         csv: [{ name: 'Weekly snapshots', columns: [{ label: 'Week', key: 'period_start' }, { label: 'Followers', key: 'followers_end' }, { label: 'Views', key: 'views' }, { label: 'Reach', key: 'reach' }, { label: 'Engagement %', key: 'engagement_rate' }, { label: 'Source', key: 'source' }], rows: hist.map((s) => ({ period_start: s.period_start, source: s.source, ...s.metrics })) }],
         data: { influencer_id: inf.id, analysis: a, weeks: hist.length },
       };
-    },
+    }, GROWTH_AI),
   },
 
   brand_statement: {
@@ -417,11 +504,44 @@ export const REPORTS: Record<string, ReportDef> = {
     },
   },
 
+  editor_workload: {
+    label: 'Editor workload report',
+    internalCap: 'campaigns',
+    sections: ['workload', 'blocked', 'delivered', 'chatgpt'],
+    ai: { types: ['editor_workload'] },
+    build: (c) => {
+      const ids: number[] = Array.isArray(c.params.editor_ids) ? c.params.editor_ids.map(Number) : [];
+      const w = editorWorkload(c.db, c.today).filter((e) => !ids.length || ids.includes(e.id));
+      const delivered = all(c.db, `SELECT t.id, t.title, t.editor_id, t.created_at, t.delivered_at, e.name AS editor, c.name AS campaign FROM content_tasks t JOIN editors e ON e.id = t.editor_id LEFT JOIN campaigns c ON c.id = t.campaign_id WHERE t.delivered_at BETWEEN ? AND ? ${ids.length ? `AND t.editor_id IN (${ids.join(',')})` : ''} ORDER BY t.delivered_at`, c.from, `${c.to}T23:59:59Z`)
+        .map((t) => ({ ...t, d: formatDate(t.delivered_at), days: Math.round(((Date.parse(t.delivered_at) - Date.parse(t.created_at)) / 86_400_000) * 10) / 10 }));
+      const content: Content[] = [];
+      if (c.sections('workload')) {
+        content.push(h2('Workload against capacity (this week)'), table([{ label: 'Editor', key: 'name' }, { label: 'Availability', key: 'av' }, { label: 'Capacity / week', key: 'capacity', num: true }, { label: 'Due this week', key: 'due_this_week', num: true }, { label: 'Utilisation', key: 'u' }, { label: 'Open', key: 'open', num: true }, { label: 'Overdue', key: 'overdue', num: true }, { label: 'Median turnaround (days)', key: 'median_turnaround_days', num: true }, { label: 'Avg revisions', key: 'avg_revisions', num: true }], w.map((e) => ({ ...e, av: humanize(e.availability), u: e.utilisation === null ? '—' : `${e.utilisation}%` }))));
+        if (w.length) content.push(chart(barChart({ categories: w.map((e) => e.name), series: [{ name: 'Due this week', color: SERIES_LIGHT[0], values: w.map((e) => e.due_this_week) }, { name: 'Capacity', color: SERIES_LIGHT[1], values: w.map((e) => e.capacity) }], theme: THEME_PRINT, width: W, height: 170, yFormat: (n) => formatNumberIN(n) })));
+      }
+      if (c.sections('blocked')) content.push(h2('Blocked work'), bullets(w.flatMap((e) => e.blocked_tasks.map((t: Row) => `${e.name}: ${t.title} — ${t.reason}`))));
+      if (c.sections('delivered')) content.push(h2('Delivered in period'), table([{ label: 'Task', key: 'title' }, { label: 'Editor', key: 'editor' }, { label: 'Campaign', key: 'campaign' }, { label: 'Delivered', key: 'd' }, { label: 'Turnaround (days)', key: 'days', num: true }], delivered));
+      return {
+        title: 'Editor workload report',
+        subtitle: ids.length ? w.map((e) => e.name).join(', ') : 'All editors',
+        summary: [
+          `${w.reduce((s2, e) => s2 + e.open, 0)} open tasks across ${w.length} editors; ${w.reduce((s2, e) => s2 + e.overdue, 0)} overdue and ${w.reduce((s2, e) => s2 + e.blocked, 0)} blocked.`,
+          `${delivered.length} tasks delivered in the period.`,
+          ...w.filter((e) => e.utilisation !== null && e.utilisation > 100).map((e) => `${e.name} is over capacity this week (${e.utilisation}%).`),
+        ],
+        content,
+        csv: [{ name: 'Workload', columns: [{ label: 'Editor', key: 'name' }, { label: 'Open', key: 'open' }, { label: 'Due this week', key: 'due_this_week' }, { label: 'Overdue', key: 'overdue' }, { label: 'Blocked', key: 'blocked' }, { label: 'Capacity', key: 'capacity' }], rows: w }, { name: 'Delivered', columns: [{ label: 'Task', key: 'title' }, { label: 'Editor', key: 'editor' }, { label: 'Delivered', key: 'delivered_at' }, { label: 'Turnaround days', key: 'days' }], rows: delivered }],
+        data: { editors: w, delivered: delivered.length },
+      };
+    },
+  },
+
   roster: {
     label: 'Shareable creator roster',
     internalCap: 'staff',
     externalCap: 'staff',
-    sections: ['roster'],
+    sections: ['roster', 'chatgpt'],
+    ai: { types: ['brand_proposal'], explicitOnly: true },
     build: (c) => {
       const ids: number[] = Array.isArray(c.params.influencer_ids) ? c.params.influencer_ids.map(Number) : [];
       const rows = all(c.db, `SELECT * FROM influencers WHERE archived_at IS NULL AND relationship NOT IN ('inactive','prospect','agency_owned') ${ids.length ? `AND id IN (${ids.join(',')})` : ''} ORDER BY name`).map((r) => decode('influencers', r)!);
@@ -498,7 +618,15 @@ export async function produce(db: Db, dataDir: string, runId: number): Promise<v
     const { from, to } = periodOf(params, t);
     const def = REPORTS[r.report_type];
     const selected: string[] | null = Array.isArray(params.sections) && params.sections.length ? params.sections : null;
-    const built = def.build({ db, params, audience: r.audience, today: t, user, from, to, sections: (k) => !selected || selected.includes(k) });
+    const ctx: Ctx = { db, params, audience: r.audience, today: t, user, from, to, sections: (k) => !selected || selected.includes(k) };
+    const built = def.build(ctx);
+    // Imported ChatGPT commentary goes last, in its own labelled box, apart from website-calculated figures.
+    const ref = def.ai?.ref?.(ctx) ?? null;
+    const analysis = def.ai && ctx.sections('chatgpt') ? analysisFor(db, ctx, def.ai, ref) : null;
+    if (analysis) {
+      built.content.push(...aiCommentary(ctx, analysis, ref, built.data.parts ? 'general' : 'all'));
+      built.data.chatgpt_analysis = { id: analysis.id, export_key: analysis.export_key, imported_at: analysis.created_at };
+    }
     run(db, 'UPDATE report_runs SET progress = 50 WHERE id = ?', runId);
     const generatedAt = formatDateTime(new Date().toISOString());
     const pdf = await renderPdf(built, { audience: r.audience, generatedAt, version: r.version, period: fyOrParams({ from, to } as Ctx) });
@@ -525,6 +653,7 @@ export function requestReport(db: Db, user: User | null, v: { report_type: strin
   if (audience === 'external' && !def.externalCap) throw new HttpError(400, `${def.label} is internal only`);
   if (user && !canGenerate(user, v.report_type, audience)) throw new HttpError(403, 'You cannot generate this report');
   const params = v.params ?? {};
+  if (params.analysis_id && def.ai) analysisFor(db, { params, audience, user, ...periodOf(params, today(db)) }, def.ai, null);
   const same = JSON.stringify(params);
   const version = all(db, 'SELECT params FROM report_runs WHERE report_type = ? AND audience = ?', v.report_type, audience).filter((x) => x.params === same).length + 1;
   const id = insert(db, 'report_runs', { report_type: v.report_type, audience, params, status: 'queued', progress: 0, attempts: 0, version, template_id: v.template_id ?? null, title: def.label, created_by: user?.id ?? null });
@@ -575,7 +704,7 @@ export function reportRoutes(app: Express, dataDir: string) {
 
   app.get('/api/reports/types', (req, res) => {
     const u = staff(req);
-    res.json({ types: Object.entries(REPORTS).map(([k, d]) => ({ key: k, label: d.label, sections: d.sections, internal: canGenerate(u, k, 'internal'), external: canGenerate(u, k, 'external') })) });
+    res.json({ types: Object.entries(REPORTS).map(([k, d]) => ({ key: k, label: d.label, sections: d.sections, ai_types: d.ai?.types ?? [], internal: canGenerate(u, k, 'internal'), external: canGenerate(u, k, 'external') })) });
   });
 
   app.get('/api/reports', (req, res) => {

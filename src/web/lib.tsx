@@ -1,7 +1,7 @@
 /** Shared web building blocks: API client, feedback, tables, forms, kanban, calendar, charts. */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { ChevronDown, ChevronUp, Columns3, Download, Moon, Plus, Sun, Trash2, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Columns3, Download, Moon, Plus, Sparkles, Sun, Trash2, X } from 'lucide-react';
 import { formatDate, formatDateTime, todayInTz } from '../shared/dates.ts';
 import { formatINR, formatNumberIN, MoneyError, paiseToRupeesString, rupeesToPaise } from '../shared/money.ts';
 import { can, ENTITY, fieldLabel, humanize, PLATFORMS, visibleFields, type Cap, type Entity, type Field, type Role } from '../shared/schema.ts';
@@ -1113,6 +1113,14 @@ export function ThemeToggle() {
   );
 }
 
+
+/** "Analyse with ChatGPT": opens the Manual ChatGPT analysis form pre-filled for these records. */
+export function AnalyseButton({ type, ids = [], cap = 'staff', period }: { type: string; ids?: number[]; cap?: Cap; period?: string }) {
+  const me = useMe();
+  if (me.user.role === 'editor' || !can(me.user.role, cap)) return null;
+  const q = new URLSearchParams({ type, ...(ids.length ? { ids: ids.join(',') } : {}), ...(period ? { period } : {}) });
+  return <Link className="btn" to={`/chatgpt/new?${q}`} title="Manual ChatGPT analysis: export a package and prompt for your own ChatGPT"><Sparkles /> Analyse with ChatGPT</Link>;
+}
 
 export function Gate({ cap, children }: { cap: Cap; children: ReactNode }) {
   return can(useMe().user.role, cap) ? <>{children}</> : <Card><p>You don't have access to this area.</p></Card>;

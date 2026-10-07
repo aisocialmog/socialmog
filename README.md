@@ -36,7 +36,7 @@ npm test        # node:test — finance engine, permissions over HTTP, forecast 
 npm run typecheck
 ```
 
-Covered: Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction.
+Covered (29 tests): Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction, and the ChatGPT workflow (package contents and exclusions, schema errors, unresolved IDs, metric conflicts, provenance, financial guards, stale exports, duplicate results, all-or-nothing apply, undo, permissions, weekly preparation, labelled PDF commentary).
 
 ## How the money works
 
@@ -62,15 +62,29 @@ Nothing is ever sent outside the app automatically: invites and reports are copi
 
 - **Instagram (Meta "Instagram API with Instagram Login")** — set `META_APP_ID`, `META_APP_SECRET`, `APP_BASE_URL` and a strong `APP_SECRET`; register `{APP_BASE_URL}/oauth/instagram/callback` as the redirect URI. **Analytics → Connections** creates a single-use 7-day link per roster profile; the creator authorises on Instagram's own page (no passwords). Long-lived tokens are AES-256-GCM encrypted and refreshed before expiry. Each sync pulls only the metrics the authorisation allows; anything unavailable is stored as null and listed. Socialmog's own accounts use a roster profile with relationship **Agency-owned**.
 - **OpenAI** — set `OPENAI_API_KEY` (optional `OPENAI_MODEL`). It writes the summary, hypotheses and three actions from computed metrics only; it never calculates figures. Without it, reports use rule-based suggestions labelled as such.
+- **Manual ChatGPT analysis** — see below. No API key; nothing is sent to OpenAI by the website.
 - **Not connected:** email/WhatsApp sending, bank feeds, YouTube API, payment gateways. Manual workflows: copy links or use the mail button; import bank statements as CSV (duplicates skipped); enter YouTube/other platforms weekly by hand or CSV; record payments manually with a reference.
+
+## Manual ChatGPT analysis
+
+Use your own ChatGPT subscription without an API integration. **Analyse with ChatGPT** appears on the overview, roster, creator, campaign, brand, deal, finance, editor, content-task and analytics pages, and under **ChatGPT analysis** in the sidebar.
+
+1. **Choose** the workflow — influencer growth, campaign performance, finance summary & cash-flow scenarios, brand proposal & shortlist, editor workload, founder review, scripts/briefs/action plans — plus records, period and questions.
+2. **Export.** Socialmog HQ builds a JSON context package (export ID, schema version, record references like `influencers:12`, handles and profile links, period and timezone, INR and metric definitions, budgets, deliverables, targets, previous results, sources and timestamps, missing-data notes, record versions and the exact response JSON Schema) and a ready-to-copy prompt. Passwords, tokens, bank/identity details and internal notes are never included; finance packages are finance-role only.
+3. **Instagram via a connector in ChatGPT** (Windsor.ai or any provider you authorised there): the prompt asks ChatGPT to match accounts by the exported username/profile link, keep Socialmog IDs, report source, retrieval time, period, units and status per account, use null for anything unavailable, and fall back to a manual export instead of guessing. Connecting a provider in ChatGPT does not connect it to Socialmog HQ.
+4. **Import** the JSON (paste or upload). It is validated against the schema with readable errors; Markdown fences are tolerated and noted. The preview lists affected records, records changed since export, and field-by-field current vs proposed values. Nothing is matched by guesswork: missing or unknown IDs must be chosen by you before those items can be applied.
+5. **Apply** the items you tick, all-or-nothing: connector metrics become weekly snapshots labelled as user-imported connector data with provenance (existing values are kept unless you pick the imported one; previous versions are retained), the analysis is stored separately from source metrics, tasks are created with the owner/priority/deadline you set, and allowed field changes are applied with the normal validation and permissions. Bank transactions, amounts, payment status and commitments are never changed by an import; finance-planning fields (expected date, confidence, priority, notes) need an explicit confirmation. The same export/result ID cannot be imported twice. Every apply is audited and can be **undone** (values restored, created records archived, history kept).
+6. **Use it**: pin recommendations to the founder dashboard, see analyses on creator and campaign pages, and generate PDFs. Reports put ChatGPT text in a separate box labelled *not calculated by Socialmog HQ*; external reports only use analyses you marked shareable.
+
+Each Monday (with the weekly analysis schedule) a package for last week is prepared automatically with an in-app reminder; it shows as done only after a valid result has been applied. Turn this off in **Settings → Automation**.
 
 ## Automation
 
-The in-process scheduler (every 30s) runs: weekly analysis at the configured day/time (default Monday 09:00 IST, for the week just ended; one run per week via unique job keys, up to 3 attempts, founder notified on failure), daily in-app reminders, daily backups (14 kept), and scheduled report templates. **Settings → Automation** shows job history with retry.
+The in-process scheduler (every 30s) runs: the weekly ChatGPT package, weekly analysis at the configured day/time (default Monday 09:00 IST, for the week just ended; one run per week via unique job keys, up to 3 attempts, founder notified on failure), daily in-app reminders, daily backups (14 kept), and scheduled report templates. **Settings → Automation** shows job history with retry.
 
 ## Reports
 
-**Reports** generates branded, searchable PDFs (with CSV) in the background: finance, founder, campaign, influencer growth, brand statement, creator statement, editor summary, expenses, asset register, deal pipeline, shareable roster. Choose period, records and sections; internal and external templates are separate (external hides commissions, margins, private notes). Each run is archived with a data snapshot and version, and permission is re-checked on download.
+**Reports** generates branded, searchable PDFs (with CSV) in the background: finance, founder, campaign, influencer growth, brand statement, creator statement, editor payment summary, editor workload, expenses, asset register, deal pipeline, shareable roster. Campaign and influencer growth reports can cover several records (one section each). Imported ChatGPT commentary can be added as its own labelled section. Choose period, records and sections; internal and external templates are separate (external hides commissions, margins, private notes). Each run is archived with a data snapshot and version, and permission is re-checked on download.
 
 ## Code map
 
@@ -78,7 +92,7 @@ The in-process scheduler (every 30s) runs: weekly analysis at the configured day
 src/shared/   schema.ts (entities → DB, validation, forms, permissions) · money.ts · dates.ts · charts.ts (SVG for web + PDF) · calc.ts
 src/server/   index.ts · app.ts (auth, CRUD, search, files, admin) · db.ts · finance.ts + finance-routes.ts · forecast.ts (pure engine)
               domain.ts (hooks, deal→campaign, shortlist, health, dashboard) · analytics.ts (weekly analysis, Instagram, OpenAI)
-              reports.ts (PDF centre) · portal.ts · jobs.ts · seed.ts
+              reports.ts (PDF centre) · chatgpt.ts (manual ChatGPT export/import) · portal.ts · jobs.ts · seed.ts
 src/web/      main.tsx (shell, routes) · lib.tsx (API client, DataTable, forms, kanban, calendar, charts) · pages/*
 tests/        node:test suites
 ```
