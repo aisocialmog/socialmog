@@ -6,7 +6,7 @@ import { requireCap, sendCsv, toCsv } from './app.ts';
 import {
   accountBalances, ageing, allocate, campaignFinancials, cashflowByPeriod, cashPosition, changeEarmark, classifyTransaction, createEarmark,
   earnings, forecastInputs, importTransactions, listEarmarks, listInvoices, listObligations, payeeStatement, recordTransaction,
-  recordTransfer, reverseSettlement, reverseTransaction, settleNonCash, today,
+  recordTransfer, reverseSettlement, reverseTransaction, settleNonCash, TDS_OWNER_LABEL, tdsPeriod, tdsRegister, today, updateTdsCredit,
 } from './finance.ts';
 import { forecast, SCENARIOS, simulatePurchase, type Confidence, type Scenario } from './forecast.ts';
 
@@ -189,6 +189,28 @@ export function financeRoutes(app: Express) {
     res.json({
       rows: all(req.db, `SELECT s.*, t.txn_date, t.reference, t.method, a.name AS account_name, u.name AS created_by_name FROM settlements s LEFT JOIN transactions t ON t.id = s.transaction_id LEFT JOIN accounts a ON a.id = t.account_id LEFT JOIN users u ON u.id = s.created_by WHERE s.${col} = ? ORDER BY s.settled_on, s.id`, id),
     });
+  });
+
+  // TDS register: what brands withheld from us (whose credit it is, and whether it has reached 26AS/AIS) and what we deducted from payouts.
+  app.get('/api/finance/tds', (req, res) => {
+    requireCap(req, 'finance');
+    const fy = typeof req.query.fy === 'string' && /^\d{4}-\d{2}$/.test(req.query.fy) ? req.query.fy : null;
+    const reg = tdsRegister(req.db, fy);
+    if (req.query.format === 'csv') {
+      return sendCsv(res, `tds-register${fy ? `-${fy}` : ''}.csv`, toCsv(reg.credits.map((c) => ({ ...c, whose: TDS_OWNER_LABEL[c.owner as keyof typeof TDS_OWNER_LABEL] ?? c.owner })), [
+        { key: 'deducted_on', label: 'Deducted on' }, { key: 'fy', label: 'FY' }, { key: 'quarter', label: 'Quarter' }, { key: 'payer_name', label: 'Deducted by' },
+        { key: 'invoice_number', label: 'Invoice no.' }, { key: 'invoice_label', label: 'For' }, { key: 'amount', label: 'TDS (INR)', type: 'money' }, { key: 'whose', label: 'Whose credit' },
+        { key: 'creator_name', label: 'Creator' }, { key: 'status', label: 'Status' }, { key: 'certificate_ref', label: 'Form 16A / certificate' }, { key: 'claimed_in', label: 'Claimed in' }, { key: 'notes', label: 'Notes' },
+      ]));
+    }
+    const fys = all(req.db, 'SELECT DISTINCT fy FROM tds_credits WHERE fy IS NOT NULL').map((r) => r.fy);
+    res.json({ ...reg, fy, current_fy: tdsPeriod(today(req.db)).fy, fys: [...new Set([tdsPeriod(today(req.db)).fy, ...fys])].sort().reverse(), owners: TDS_OWNER_LABEL });
+  });
+
+  app.patch('/api/finance/tds/:id', (req, res) => {
+    const u = requireCap(req, 'finance');
+    updateTdsCredit(req.db, u, Number(req.params.id), req.body ?? {});
+    res.json({ ok: true });
   });
 
   app.post('/api/finance/settlements', (req, res) => {

@@ -559,6 +559,28 @@ export const ENTITIES: Entity[] = [
     ],
   },
   {
+    // TDS a brand withheld from a payment to us, and whose tax credit it is.
+    key: 'tds_credits', label: 'TDS credit', plural: 'TDS register', title: 'payer_name', read: 'finance', write: 'finance', internal: true,
+    fields: [
+      ref('settlement_id', 'settlements'),
+      ref('invoice_id', 'invoices'),
+      f('payer_name', 'text'),
+      f('amount', 'money', { required: true }),
+      f('deducted_on', 'date', { required: true }),
+      f('fy', 'text'),
+      f('quarter', 'text'),
+      f('return_due', 'date'),
+      en('owner', ['agency', 'agency_for_creator', 'creator']),
+      ref('influencer_id', 'influencers'),
+      ref('obligation_id', 'obligations'),
+      ref('creator_settlement_id', 'settlements'),
+      en('status', ['expected', 'in_26as', 'claimed', 'not_received', 'creator_claims', 'reversed']),
+      f('certificate_ref', 'text'),
+      f('claimed_in', 'text'),
+      f('notes', 'text'),
+    ],
+  },
+  {
     key: 'earmarks', label: 'Earmark', plural: 'Earmarks', title: 'label', read: 'finance', write: 'finance', internal: true,
     fields: [
       en('target_type', ['obligation', 'campaign', 'reserve']),

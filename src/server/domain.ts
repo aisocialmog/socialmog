@@ -623,14 +623,19 @@ export function dashboard(db: Db, user: User) {
         contribution_margin: fy.contribution_margin, opex: fy.opex, gross_billings: fy.gross_billings, operating_result: fy.operating_result, capex: fy.capex,
       },
     };
-    for (const o of position.payables.items.filter((x) => x.days_overdue > 0)) add('high', 'payable_overdue', `Overdue: ${o.description}`, `${o.payee ?? ''} · ${formatINR(o.outstanding)} · due ${formatDate(o.due_date)}`, `/finance/payables/${o.id}`, o.outstanding);
-    for (const o of position.payables.items.filter((x) => x.days_overdue === 0 && x.due_date <= addDays(t, 7) && x.unfunded > 0)) add('medium', 'payable_due', `Due ${formatDate(o.due_date)}: ${o.description}`, `${o.payee ?? ''} · ${formatINR(o.unfunded)} not earmarked`, `/finance/payables/${o.id}`, o.outstanding);
+    for (const o of position.payables.items.filter((x) => x.days_overdue > 0 && x.status !== 'on_hold')) add('high', 'payable_overdue', `Overdue: ${o.description}`, `${o.payee ?? ''} · ${formatINR(o.outstanding)} · due ${formatDate(o.due_date)}`, `/finance/payables/${o.id}`, o.outstanding);
+    for (const o of position.payables.items.filter((x) => x.days_overdue === 0 && x.status !== 'on_hold' && x.due_date <= addDays(t, 7) && x.unfunded > 0)) add('medium', 'payable_due', `Due ${formatDate(o.due_date)}: ${o.description}`, `${o.payee ?? ''} · ${formatINR(o.unfunded)} not earmarked`, `/finance/payables/${o.id}`, o.outstanding);
     if (base.earliestShortfall) add('high', 'shortfall', `Projected cash shortfall on ${formatDate(base.earliestShortfall.date)}`, `${base.earliestShortfall.label} · funding required ${formatINR(base.fundingRequired)} (base scenario)`, '/finance/forecast', base.fundingRequired);
     else if (conservative.earliestShortfall) add('medium', 'shortfall', `Conservative scenario: shortfall on ${formatDate(conservative.earliestShortfall.date)}`, `Funding required ${formatINR(conservative.fundingRequired)} if collections slip`, '/finance/forecast?scenario=conservative', conservative.fundingRequired);
     for (const r of position.receivables.items.filter((x) => x.days_overdue > 0)) add(r.days_overdue > 30 ? 'high' : 'medium', 'receivable_overdue', `${r.payer ?? 'Payer'} owes ${formatINR(r.outstanding)}`, `${r.label}${r.number ? ` (${r.number})` : ''} · ${r.days_overdue} days overdue`, `/finance/receivables/${r.id}`, r.outstanding);
     for (const r of position.receivables.items.filter((x) => x.confidence === 'at_risk' && x.days_overdue === 0)) add('medium', 'receivable_risk', `At risk: ${r.label}`, `${r.payer ?? ''} · ${formatINR(r.outstanding)} expected ${formatDate(r.expected_date)}`, `/finance/receivables/${r.id}`, r.outstanding);
     const unclassified = get(db, `SELECT COUNT(*) n FROM transactions WHERE category IN ('uncategorised_in','uncategorised_out') AND reversed_by_id IS NULL`)!.n;
     if (unclassified) add('medium', 'uncategorised', `${unclassified} imported transaction(s) to categorise`, 'Uncategorised money is left out of earnings reports', '/finance/transactions?category=uncategorised');
+    // TDS brands withheld from us: remind to check 26AS/AIS once the brand's quarterly TDS return should be filed.
+    for (const c of all(db, `SELECT * FROM tds_credits WHERE owner <> 'creator' AND status IN ('expected','not_received')`)) {
+      if (c.status === 'not_received') add('high', 'tds', `TDS missing from 26AS: ${c.payer_name}`, `${formatINR(c.amount)} · ${c.quarter} FY ${c.fy} — ask the brand to file or correct its TDS return`, '/finance/tds', c.amount);
+      else if (addDays(c.return_due, 15) < t) add('medium', 'tds', `Check 26AS/AIS for TDS from ${c.payer_name}`, `${formatINR(c.amount)} · ${c.quarter} FY ${c.fy} · their TDS return was due ${formatDate(c.return_due)}`, '/finance/tds', c.amount);
+    }
     if (position.unallocated < 0) add('high', 'over_allocated', 'Earmarks exceed cash', `Earmarked ${formatINR(position.earmarks.total)} vs cash ${formatINR(position.cash)}`, '/finance/allocations');
   }
 

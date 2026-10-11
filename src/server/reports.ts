@@ -14,7 +14,7 @@ import { dealEconomics } from '../shared/calc.ts';
 import { can, humanize, type Cap } from '../shared/schema.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, update, type Db, type Row, type User } from './db.ts';
 import { founders, notify, requireUser, toCsv } from './app.ts';
-import { accountBalances, ageing, campaignFinancials, cashflowByPeriod, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, today } from './finance.ts';
+import { accountBalances, ageing, campaignFinancials, cashflowByPeriod, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, tdsRegister, today } from './finance.ts';
 import { forecast, SCENARIOS } from './forecast.ts';
 import { campaignHealth, creatorStats, dashboard, editorWorkload, influencerTrends, PHOTO_MAX, photoPath, safePhoto } from './domain.ts';
 import { analyseWeek, enrich } from './analytics.ts';
@@ -198,7 +198,7 @@ export const REPORTS: Record<string, ReportDef> = {
   finance: {
     label: 'Finance report',
     internalCap: 'finance',
-    sections: ['cash', 'receivables', 'payables', 'campaigns', 'earnings', 'forecast', 'chatgpt'],
+    sections: ['cash', 'receivables', 'payables', 'campaigns', 'earnings', 'forecast', 'tds', 'chatgpt'],
     ai: { types: ['finance_summary'] },
     build: (c) => {
       const { db } = c;
@@ -248,6 +248,24 @@ export const REPORTS: Record<string, ReportDef> = {
           [e.basis.assets === 'capitalise' ? 'Depreciation' : 'Asset purchases expensed', money(e.basis.assets === 'capitalise' ? e.depreciation : e.capex)], ['Operating result (profit before tax)', money(e.operating_result)],
         ]), h2('Shown separately (not operating results)'), kv([['Asset purchases (cash)', money(e.capex)], ['Taxes paid (GST/TDS remitted)', money(e.taxes_paid)], ['Founder contributions', money(e.financing.founder_contributions)], ['Founder withdrawals', money(e.financing.founder_withdrawals)], ['Loans received', money(e.financing.loans_received)], ['Loan repayments', money(e.financing.loan_repayments)]]),
         p({ text: 'Calculation basis', bold: true }), bullets(e.explanation));
+      }
+      if (c.sections('tds')) {
+        // TDS in the period: brand-withheld credits by whose they are, and what we deducted and still have to deposit.
+        const reg = tdsRegister(db, null);
+        const inPeriod = (d: string | null) => !!d && d >= c.from && d <= c.to;
+        const credits = reg.credits.filter((x: Row) => x.status !== 'reversed' && inPeriod(x.deducted_on));
+        const ours = credits.filter((x: Row) => x.owner !== 'creator');
+        const deducted = reg.deducted.filter((x: Row) => inPeriod(x.deducted_on));
+        const total = (rows: Row[], k = 'amount') => rows.reduce((a, r) => a + r[k], 0);
+        content.push(h2('TDS'), kv([
+          ['TDS withheld by brands — our credit', money(total(ours))],
+          ['   confirmed in 26AS/AIS', money(total(ours.filter((x: Row) => ['in_26as', 'claimed'].includes(x.status))))],
+          ['   not received — follow up with the brand', money(total(ours.filter((x: Row) => x.status === 'not_received')))],
+          ['   owed on to creators once confirmed', money(total(credits.filter((x: Row) => x.owner === 'agency_for_creator')))],
+          ["Withheld under creators' PAN (theirs to claim)", money(total(credits.filter((x: Row) => x.owner === 'creator')))],
+          ['TDS we deducted from payouts', money(total(deducted))],
+          ['   still to deposit', money(total(deducted, 'outstanding'))],
+        ]));
       }
       if (c.sections('forecast')) {
         content.push(h2('Cash forecast — next 90 days'), chart(lineChart({ labels: base.daily.map((d) => formatDate(d.date, { year: false })), series: [{ name: 'Base scenario', color: SERIES_LIGHT[0], values: base.daily.map((d) => d.closing) }, { name: 'Conservative', color: SERIES_LIGHT[1], values: cons.daily.map((d) => d.closing) }], reference: { value: 0, label: 'Zero' }, yFormat: (n) => formatINR(n, { compact: true }), theme: THEME_PRINT, width: W, height: 210 })),

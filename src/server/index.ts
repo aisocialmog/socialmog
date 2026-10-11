@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createApp, errorHandler, hashPassword } from './app.ts';
 import { get, getSetting, insert, openDb } from './db.ts';
+import { backfillTdsCredits } from './finance.ts';
 import { startScheduler } from './jobs.ts';
 import { seedDemo } from './seed.ts';
 
@@ -21,6 +22,7 @@ if (!get(db, 'SELECT id FROM users LIMIT 1')) {
   console.log(`\nCreated founder account: ${email}${process.env.FOUNDER_PASSWORD ? '' : `  password: ${password}  (change it in Settings)`}\n`);
 }
 if (process.env.SEED_DEMO !== '0' && !getSetting(db, 'demo_seeded', false)) seedDemo(db);
+backfillTdsCredits(db);
 
 const app = createApp(db, { dataDir, production });
 if (production) {

@@ -146,6 +146,8 @@ export interface Allocation {
   amount: Paise;
   /** Non-cash part settled together with this payment (TDS withheld by payer / deducted by us). */
   tds?: Paise;
+  /** Receivables only: whose TDS it is (defaults to all ours). */
+  tds_split?: TdsShare[];
 }
 
 export interface TxnInput {
@@ -273,8 +275,9 @@ export function allocate(db: Db, user: User, transactionId: number, allocations:
       insert(db, 'settlements', { ...base, transaction_id: transactionId, kind: 'cash', amount: a.amount });
       if (tds) {
         const sid = insert(db, 'settlements', { ...base, transaction_id: null, kind: 'tds', amount: tds, reason: 'TDS' });
-        if (!isInvoice) createTdsPayable(db, user, target, tds, t.txn_date, sid);
-      }
+        if (isInvoice) recordTdsCredit(db, user, target, sid, tds, t.txn_date, a.tds_split);
+        else createTdsPayable(db, user, target, tds, t.txn_date, sid);
+      } else if (a.tds_split?.length) throw new HttpError(400, 'TDS ownership was given without a TDS amount');
       if (!isInvoice) afterObligationSettled(db, user, a.obligation_id!);
     }
     audit(db, user.id, 'allocate', 'transactions', transactionId, null, allocations);
@@ -375,7 +378,7 @@ export function reverseTransaction(db: Db, user: User, id: number, reason: strin
 export function settleNonCash(
   db: Db,
   user: User,
-  input: { invoice_id?: number; obligation_id?: number; kind: 'tds' | 'write_off' | 'waiver'; amount: Paise; settled_on: string; reason: string },
+  input: { invoice_id?: number; obligation_id?: number; kind: 'tds' | 'write_off' | 'waiver'; amount: Paise; settled_on: string; reason: string; tds_split?: TdsShare[] },
 ): number {
   if (!input.reason?.trim()) throw new HttpError(400, 'A reason is required');
   if (!['tds', 'write_off', 'waiver'].includes(input.kind)) throw new HttpError(400, 'Invalid adjustment kind');
@@ -392,6 +395,7 @@ export function settleNonCash(
       kind: input.kind, amount, settled_on: date, reason: input.reason, created_by: user.id,
     });
     if (!isInvoice && input.kind === 'tds') createTdsPayable(db, user, target, amount, date, id);
+    if (isInvoice && input.kind === 'tds') recordTdsCredit(db, user, target, id, amount, date, input.tds_split);
     if (!isInvoice) afterObligationSettled(db, user, input.obligation_id!);
     audit(db, user.id, 'settle', isInvoice ? 'invoices' : 'obligations', target.id, null, input);
     return id;
@@ -404,12 +408,169 @@ export function reverseSettlement(db: Db, user: User, id: number, reason: string
   tx(db, () => {
     const s = get(db, 'SELECT * FROM settlements WHERE id = ?', id);
     if (!s || s.reversed_at) throw new HttpError(404, 'Active settlement not found');
+    if (s.kind === 'tds' && s.invoice_id) reverseTdsCredits(db, user, id, reason);
+    if (s.kind === 'tds' && s.obligation_id && get(db, `SELECT id FROM tds_credits WHERE creator_settlement_id = ? AND status <> 'reversed'`, id)) {
+      throw new HttpError(400, 'This TDS was deducted by a brand under the creator\'s PAN. Reverse it from the brand receivable instead.');
+    }
     run(db, 'UPDATE settlements SET reversed_at = ?, reversed_reason = ? WHERE id = ?', new Date().toISOString(), reason, id);
     if (s.kind === 'tds' && s.obligation_id) {
       run(db, `UPDATE obligations SET status = 'cancelled', cancel_reason = ? WHERE source = ? AND status <> 'cancelled'`, `TDS settlement #${id} reversed`, `tds:${id}`);
     }
     audit(db, user.id, 'reverse', 'settlements', id, s, null, reason);
   });
+}
+
+// ---------------------------------------------------------------- TDS withheld by brands (our tax credits)
+
+export type TdsOwner = 'agency' | 'agency_for_creator' | 'creator';
+export interface TdsShare { owner: TdsOwner; amount: Paise; influencer_id?: number | null; obligation_id?: number | null }
+export const TDS_OWNER_LABEL: Record<TdsOwner, string> = {
+  agency: 'Ours — we claim it',
+  agency_for_creator: "We claim it, but it is the creator's money",
+  creator: "Creator claims it (deducted under the creator's PAN)",
+};
+
+/** Indian financial year and quarter of a deduction, and the deductor's quarterly TDS return due date (the credit shows in 26AS/AIS after it is filed). */
+export function tdsPeriod(date: string) {
+  const y = Number(date.slice(0, 4));
+  const m = Number(date.slice(5, 7));
+  const fy = m >= 4 ? y : y - 1;
+  const q = m <= 3 ? 4 : m <= 6 ? 1 : m <= 9 ? 2 : 3;
+  const returnDue = [`${fy}-07-31`, `${fy}-10-31`, `${fy + 1}-01-31`, `${fy + 1}-05-31`][q - 1];
+  return { fy: `${fy}-${String((fy + 1) % 100).padStart(2, '0')}`, quarter: `Q${q}`, return_due: returnDue };
+}
+
+/**
+ * Records who a brand-withheld TDS belongs to. One deduction can be split between owners:
+ * - agency: our tax credit, tracked until it shows in 26AS/AIS and is claimed;
+ * - agency_for_creator: credited under our PAN but owed to the creator — an on-hold payable to them is released once the credit is confirmed;
+ * - creator: deducted under the creator's PAN, so they claim it and we pay them that much less (no TDS deposit by us).
+ */
+function recordTdsCredit(db: Db, user: User, invoice: Row, settlementId: number, amount: Paise, date: string, shares?: TdsShare[]) {
+  const list: TdsShare[] = shares?.length ? shares : [{ owner: 'agency', amount }];
+  const total = list.reduce((sum, x) => sum + requireAmount(x?.amount, 'TDS share'), 0);
+  if (total !== amount) throw new HttpError(400, `The TDS split (${formatINR(total)}) must add up to the TDS amount (${formatINR(amount)})`);
+  const period = tdsPeriod(date);
+  const payer = invoice.payer ?? invoice.payer_name ?? 'Brand';
+  for (const share of list) {
+    if (!(share.owner in TDS_OWNER_LABEL)) throw new HttpError(400, 'Choose whose TDS this is');
+    const inf = share.owner === 'agency' ? null : get(db, 'SELECT id, name FROM influencers WHERE id = ?', Number(share.influencer_id));
+    if (share.owner !== 'agency' && !inf) throw new HttpError(400, 'Choose the creator this TDS belongs to');
+    const creditId = insert(db, 'tds_credits', {
+      settlement_id: settlementId, invoice_id: invoice.id, payer_name: payer, amount: share.amount, deducted_on: date, ...period,
+      owner: share.owner, influencer_id: inf?.id ?? null, status: share.owner === 'creator' ? 'creator_claims' : 'expected', created_by: user.id,
+    });
+    if (share.owner === 'agency_for_creator') {
+      // Owed to the creator, but only once the credit is really ours: on hold (left out of forecasts) until confirmed in 26AS/AIS.
+      const ob = insert(db, 'obligations', {
+        description: `TDS credit to pass on to ${inf!.name} — ${invoice.label}${invoice.number ? ` (${invoice.number})` : ''}`, category: 'creator_payout',
+        payee_type: 'influencer', influencer_id: inf!.id, campaign_id: invoice.campaign_id ?? null, amount: share.amount,
+        due_date: addDays(period.return_due, 15), status: 'on_hold', priority: 'normal', repeat: 'none', source: `tdscredit:${creditId}`,
+        notes: `Released when the TDS from ${payer} shows in our 26AS/AIS`, created_by: user.id,
+      });
+      update(db, 'tds_credits', creditId, { obligation_id: ob });
+    }
+    if (share.owner === 'creator') {
+      const ob = listObligations(db, today(db), { ids: [Number(share.obligation_id)] })[0];
+      if (!ob || ob.status === 'cancelled' || ob.influencer_id !== inf!.id) throw new HttpError(400, `Choose an open payable to ${inf!.name} to reduce by this TDS`);
+      if (share.amount > ob.outstanding) throw new HttpError(400, `${ob.description}: only ${formatINR(ob.outstanding)} is still owed to ${inf!.name}`);
+      // The brand deposits this TDS for the creator, so we pay them that much less and deposit nothing ourselves.
+      const sid = insert(db, 'settlements', {
+        obligation_id: ob.id, transaction_id: null, kind: 'tds', amount: share.amount, settled_on: date, created_by: user.id,
+        reason: `TDS deducted by ${payer} under the creator's PAN (receivable #${invoice.id})`,
+      });
+      update(db, 'tds_credits', creditId, { obligation_id: ob.id, creator_settlement_id: sid });
+      afterObligationSettled(db, user, ob.id);
+    }
+    audit(db, user.id, 'create', 'tds_credits', creditId, null, { ...share, invoice_id: invoice.id, settlement_id: settlementId });
+  }
+}
+
+function reverseTdsCredits(db: Db, user: User, settlementId: number, reason: string) {
+  const now = new Date().toISOString();
+  for (const c of all(db, `SELECT * FROM tds_credits WHERE settlement_id = ? AND status <> 'reversed'`, settlementId)) {
+    if (c.owner === 'agency_for_creator' && c.obligation_id) {
+      const ob = listObligations(db, today(db), { ids: [c.obligation_id] })[0];
+      if (ob && ob.paid + ob.tds > 0) throw new HttpError(400, `The creator has already been paid part of this TDS credit (${ob.description}). Reverse that payment first.`);
+      run(db, `UPDATE obligations SET status = 'cancelled', cancel_reason = ?, updated_at = ? WHERE id = ? AND status <> 'cancelled'`, `Brand TDS reversed: ${reason}`, now, c.obligation_id);
+    }
+    if (c.creator_settlement_id) run(db, 'UPDATE settlements SET reversed_at = ?, reversed_reason = ? WHERE id = ? AND reversed_at IS NULL', now, `Brand TDS reversed: ${reason}`, c.creator_settlement_id);
+    update(db, 'tds_credits', c.id, { status: 'reversed' });
+    audit(db, user.id, 'reverse', 'tds_credits', c.id, c, { status: 'reversed' }, reason);
+  }
+}
+
+/** TDS recorded before the register existed is listed as ours and waiting for 26AS, to be checked. Idempotent; runs at startup. */
+export function backfillTdsCredits(db: Db): number {
+  const missing = all(db, `SELECT s.* FROM settlements s WHERE s.kind = 'tds' AND s.invoice_id IS NOT NULL AND s.reversed_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM tds_credits c WHERE c.settlement_id = s.id)`);
+  for (const s of missing) {
+    const inv = listInvoices(db, today(db), { ids: [s.invoice_id] })[0];
+    insert(db, 'tds_credits', {
+      settlement_id: s.id, invoice_id: s.invoice_id, payer_name: inv?.payer ?? 'Brand', amount: s.amount, deducted_on: s.settled_on, ...tdsPeriod(s.settled_on),
+      owner: 'agency', status: 'expected', notes: 'Recorded before the TDS register — confirm whose TDS this is', created_by: s.created_by ?? null,
+    });
+  }
+  return missing.length;
+}
+
+/** Track a credit until it is ours: confirmed in 26AS/AIS (releases any amount owed to the creator), claimed, or not received. */
+export function updateTdsCredit(db: Db, user: User, id: number, input: { status?: string; certificate_ref?: string | null; claimed_in?: string | null; notes?: string | null }) {
+  return tx(db, () => {
+    const c = get(db, 'SELECT * FROM tds_credits WHERE id = ?', id);
+    if (!c || c.status === 'reversed') throw new HttpError(404, 'TDS entry not found');
+    const values: Row = {};
+    for (const k of ['certificate_ref', 'claimed_in', 'notes'] as const) {
+      if (input[k] === undefined) continue;
+      if (input[k] !== null && (typeof input[k] !== 'string' || input[k]!.length > 300)) throw new HttpError(400, `Invalid ${k.replace('_', ' ')}`);
+      values[k] = input[k]?.trim() || null;
+    }
+    if (input.status !== undefined && input.status !== c.status) {
+      if (c.owner === 'creator') throw new HttpError(400, 'The creator claims this TDS; there is nothing for us to track');
+      if (!['expected', 'in_26as', 'claimed', 'not_received'].includes(input.status)) throw new HttpError(400, 'Invalid status');
+      values.status = input.status;
+      if (c.owner === 'agency_for_creator' && c.obligation_id) {
+        const ob = get(db, 'SELECT * FROM obligations WHERE id = ?', c.obligation_id);
+        const confirmed = ['in_26as', 'claimed'].includes(input.status);
+        if (ob && confirmed && ob.status === 'on_hold') update(db, 'obligations', ob.id, { status: 'committed', due_date: ob.due_date < today(db) ? today(db) : ob.due_date });
+        if (ob && !confirmed && ob.status === 'committed' && !get(db, 'SELECT id FROM settlements WHERE obligation_id = ? AND reversed_at IS NULL', ob.id)) update(db, 'obligations', ob.id, { status: 'on_hold' });
+      }
+    }
+    if (!Object.keys(values).length) return;
+    update(db, 'tds_credits', id, values);
+    audit(db, user.id, 'update', 'tds_credits', id, c, values);
+  });
+}
+
+/** Register for a financial year: credits from brands and the TDS we deducted from payouts. */
+export function tdsRegister(db: Db, fy: string | null) {
+  const credits = all(db, `SELECT c.*, i.label AS invoice_label, i.number AS invoice_number, i.campaign_id, cp.name AS campaign_name, inf.name AS creator_name, o.status AS payable_status
+    FROM tds_credits c LEFT JOIN invoices i ON i.id = c.invoice_id LEFT JOIN campaigns cp ON cp.id = i.campaign_id LEFT JOIN influencers inf ON inf.id = c.influencer_id LEFT JOIN obligations o ON o.id = c.obligation_id
+    ${fy ? 'WHERE c.fy = ?' : ''} ORDER BY c.deducted_on DESC, c.id DESC`, ...(fy ? [fy] : []));
+  const deducted = listObligations(db, today(db), {}).filter((o) => String(o.source ?? '').startsWith('tds:') && o.status !== 'cancelled').map((o) => {
+    const s = get(db, `SELECT s.settled_on, s.obligation_id, x.description, x.payee_type, i.name AS creator, e.name AS editor, x.payee_name FROM settlements s JOIN obligations x ON x.id = s.obligation_id
+      LEFT JOIN influencers i ON i.id = x.influencer_id LEFT JOIN editors e ON e.id = x.editor_id WHERE s.id = ?`, Number(String(o.source).slice(4)));
+    return { ...o, deducted_on: s?.settled_on ?? null, deducted_from: s?.creator ?? s?.editor ?? s?.payee_name ?? null, for_payable: s?.obligation_id ?? null, for_description: s?.description ?? null, ...(s?.settled_on ? tdsPeriod(s.settled_on) : {}) };
+  }).filter((o) => !fy || o.fy === fy);
+  const live = credits.filter((c) => c.status !== 'reversed');
+  const sum = (rows: Row[]) => rows.reduce((a, r) => a + r.amount, 0);
+  const ours = live.filter((c) => c.owner !== 'creator');
+  return {
+    credits,
+    deducted,
+    summary: {
+      claimable: sum(ours),
+      confirmed: sum(ours.filter((c) => ['in_26as', 'claimed'].includes(c.status))),
+      claimed: sum(ours.filter((c) => c.status === 'claimed')),
+      awaiting: sum(ours.filter((c) => c.status === 'expected')),
+      not_received: sum(ours.filter((c) => c.status === 'not_received')),
+      owed_to_creators: sum(live.filter((c) => c.owner === 'agency_for_creator')),
+      creator_claimed: sum(live.filter((c) => c.owner === 'creator')),
+      deducted_by_us: deducted.reduce((a, o) => a + o.amount, 0),
+      deposited: deducted.reduce((a, o) => a + o.paid, 0),
+      to_deposit: deducted.reduce((a, o) => a + o.outstanding, 0),
+    },
+  };
 }
 
 // ---------------------------------------------------------------- earmarks

@@ -20,6 +20,7 @@ const SUBNAV: { to: string; label: string; cap: 'finance' | 'campaign_finance' }
   { to: '/finance/forecast', label: 'Forecast', cap: 'finance' },
   { to: '/finance/simulate', label: 'Can we afford it?', cap: 'finance' },
   { to: '/finance/calendar', label: 'Cash calendar', cap: 'finance' },
+  { to: '/finance/tds', label: 'TDS', cap: 'finance' },
   { to: '/finance/campaigns', label: 'Campaign margins', cap: 'campaign_finance' },
   { to: '/finance/reports', label: 'Reports', cap: 'finance' },
   { to: '/finance/accounts', label: 'Accounts', cap: 'finance' },
@@ -44,6 +45,7 @@ export function Finance() {
           <Route path="forecast" element={<Gate cap="finance"><Forecast /></Gate>} />
           <Route path="simulate" element={<Gate cap="finance"><Simulate /></Gate>} />
           <Route path="calendar" element={<Gate cap="finance"><CashCalendar /></Gate>} />
+          <Route path="tds" element={<Gate cap="finance"><TdsRegister /></Gate>} />
           <Route path="campaigns" element={<CampaignMargins />} />
           <Route path="reports" element={<Gate cap="finance"><FinanceReports /></Gate>} />
           <Route path="accounts" element={<Gate cap="finance"><Accounts /></Gate>} />
@@ -143,6 +145,7 @@ function RecordMoney({ direction, preset, onDone }: { direction: 'in' | 'out'; p
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('');
+  const [owners, setOwners] = useState<Record<number, Row[]>>({});
   const set = (k: string, val: any) => setV((x) => ({ ...x, [k]: val }));
   useEffect(() => {
     if (!v.account_id && accounts.data?.rows.length) set('account_id', accounts.data.rows.find((a) => a.active && a.type === 'bank')?.id ?? accounts.data.rows[0].id);
@@ -163,7 +166,10 @@ function RecordMoney({ direction, preset, onDone }: { direction: 'in' | 'out'; p
     if (allocated > v.amount) return setError(`Allocated ${formatINR(allocated)} is more than the amount ${formatINR(v.amount)}`);
     setBusy(true);
     try {
-      const allocations = Object.entries(alloc).filter(([, a]) => (a.amount ?? 0) > 0 || (a.tds ?? 0) > 0).map(([id, a]) => ({ [direction === 'in' ? 'invoice_id' : 'obligation_id']: Number(id), amount: a.amount ?? 0, tds: a.tds || undefined }));
+      const allocations = Object.entries(alloc).filter(([, a]) => (a.amount ?? 0) > 0 || (a.tds ?? 0) > 0).map(([id, a]) => ({
+        [direction === 'in' ? 'invoice_id' : 'obligation_id']: Number(id), amount: a.amount ?? 0, tds: a.tds || undefined,
+        ...(direction === 'in' && a.tds ? { tds_split: tdsSplit(owners[Number(id)], a.tds) } : {}),
+      }));
       if (allocations.some((a) => !a.amount)) throw new Error('Each allocation needs a cash amount (record pure TDS/write-offs from the receivable or payable page)');
       await api('/api/finance/transactions', { body: { ...v, direction, allocations, idempotency_key: key, allow_duplicate: allowDuplicate } });
       toast(direction === 'in' ? 'Receipt recorded' : 'Payment recorded');
@@ -217,6 +223,12 @@ function RecordMoney({ direction, preset, onDone }: { direction: 'in' | 'out'; p
           </table>
           {!targets.length && <Empty title="Nothing outstanding" />}
         </div>
+        {direction === 'in' && targets.filter((r) => (alloc[r.id]?.tds ?? 0) > 0).map((r) => (
+          <div key={r.id} className="card stack tight">
+            <strong className="small">Whose TDS is the {formatINR(alloc[r.id].tds!)} withheld on “{r.label}”?</strong>
+            <TdsOwnership total={alloc[r.id].tds!} value={owners[r.id] ?? [{ owner: 'agency' }]} onChange={(x) => setOwners({ ...owners, [r.id]: x })} />
+          </div>
+        ))}
         <div className="small">Applied <strong>{formatINR(allocated)}</strong> of {formatINR(v.amount ?? 0)} · unapplied {formatINR(Math.max(0, (v.amount ?? 0) - allocated))} stays on the transaction{v.campaign_id ? ' (tagged to the campaign)' : ''}</div>
       </div>
       <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn primary" disabled={busy} onClick={() => submit()}>{busy ? 'Saving…' : 'Record'}</button></div>
@@ -583,7 +595,9 @@ function SettlementList({ rows, onChange }: { rows: Row[]; onChange: () => void 
 function Adjust({ target, kinds, max, onDone }: { target: Row; kinds: string[]; max: number; onDone: () => void }) {
   const today = useToday();
   const [v, setV] = useState<Row>({ kind: kinds[0], amount: null, settled_on: today, reason: '' });
+  const [owners, setOwners] = useState<Row[]>([{ owner: 'agency' }]);
   const [err, setErr] = useState('');
+  const brandTds = !!target.invoice_id && v.kind === 'tds';
   const labels: Record<string, string> = { tds: 'TDS (withheld/deducted)', write_off: 'Write-off (bad debt)', waiver: 'Waived (not payable)' };
   return (
     <div className="stack">
@@ -593,15 +607,146 @@ function Adjust({ target, kinds, max, onDone }: { target: Row; kinds: string[]; 
       <label className="field"><span>Amount</span><MoneyField value={v.amount} onChange={(p) => setV({ ...v, amount: p })} /></label>
       <label className="field"><span>Date</span><input type="date" className="input" max={today} value={v.settled_on} onChange={(e) => setV({ ...v, settled_on: e.target.value })} /></label>
       <label className="field"><span>Reason *</span><input className="input" value={v.reason} onChange={(e) => setV({ ...v, reason: e.target.value })} /></label>
+      {brandTds && v.amount > 0 && <div className="field"><span>Whose TDS is it?</span><TdsOwnership total={v.amount} value={owners} onChange={setOwners} /></div>}
       <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn primary" onClick={async () => {
         try {
-          await api('/api/finance/settlements', { body: { ...target, ...v } });
+          await api('/api/finance/settlements', { body: { ...target, ...v, ...(brandTds && v.amount ? { tds_split: tdsSplit(owners, v.amount) } : {}) } });
           toast('Recorded');
           onDone();
         } catch (e) {
           setErr((e as Error).message);
         }
       }}>Record</button></div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- TDS
+
+const TDS_OWNERS: [string, string, string][] = [
+  ['agency', 'Ours — we claim it', 'Tracked under Finance → TDS until it shows in our 26AS/AIS and is claimed.'],
+  ['agency_for_creator', "We claim it, but it's the creator's money", 'Creates a payable to the creator for this amount, on hold until the credit shows in our 26AS/AIS.'],
+  ['creator', 'Creator claims it (deducted under their PAN)', 'Reduces what we owe the creator. The brand deposits it for them, so we deposit nothing.'],
+];
+const TDS_STATUS: Record<string, [string, string]> = {
+  expected: ['Waiting for 26AS', 'warn'], in_26as: ['In 26AS / AIS', 'info'], claimed: ['Claimed', 'good'], not_received: ['Not in 26AS — follow up', 'bad'],
+  creator_claims: ['Creator claims it', ''], reversed: ['Reversed', ''],
+};
+
+/** One owner gets the whole TDS; with a split, each share carries its own amount. */
+function tdsSplit(shares: Row[] | undefined, total: number) {
+  const list = shares?.length ? shares : [{ owner: 'agency' }];
+  return list.length === 1 ? [{ ...list[0], amount: total }] : list;
+}
+
+function TdsOwnership({ total, value, onChange }: { total: number; value: Row[]; onChange: (v: Row[]) => void }) {
+  const creators = useOptions('influencers');
+  const payables = useApi<{ rows: Row[] }>(value.some((s) => s.owner === 'creator') ? '/api/finance/payables?open=1' : null);
+  const split = value.length > 1;
+  const sum = value.reduce((a, s) => a + (s.amount ?? 0), 0);
+  const set = (i: number, patch: Row) => onChange(value.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  return (
+    <div className="stack tight">
+      {value.map((s, i) => (
+        <div key={i} className="stack tight">
+          <div className="row">
+            <select className="input" style={{ width: 'auto' }} aria-label="Whose TDS" value={s.owner} onChange={(e) => set(i, { owner: e.target.value, obligation_id: null })}>{TDS_OWNERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+            {split && <span style={{ width: 150 }}><MoneyField value={s.amount ?? null} onChange={(p) => set(i, { amount: p })} label="Share" /></span>}
+            {s.owner !== 'agency' && <select className="input" style={{ width: 'auto' }} aria-label="Creator" value={s.influencer_id ?? ''} onChange={(e) => set(i, { influencer_id: Number(e.target.value) || null, obligation_id: null })}><option value="">Which creator…</option>{creators.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>}
+            {s.owner === 'creator' && s.influencer_id && (
+              <select className="input" style={{ width: 'auto' }} aria-label="Payable to reduce" value={s.obligation_id ?? ''} onChange={(e) => set(i, { obligation_id: Number(e.target.value) || null })}>
+                <option value="">Reduce which payable…</option>
+                {(payables.data?.rows ?? []).filter((o) => o.influencer_id === s.influencer_id && o.status !== 'cancelled' && o.outstanding > 0).map((o) => <option key={o.id} value={o.id}>{o.description} — {formatINR(o.outstanding)} owed</option>)}
+              </select>
+            )}
+            {split && <button className="btn ghost sm" onClick={() => onChange(value.filter((_, j) => j !== i))}>Remove</button>}
+          </div>
+          <span className="small muted">{TDS_OWNERS.find(([k]) => k === s.owner)?.[2]}</span>
+        </div>
+      ))}
+      <div className="row small">
+        <button className="btn ghost sm" onClick={() => {
+          const half = Math.round(total / 2 / 100) * 100; // whole rupees
+          onChange(split ? [...value, { owner: 'agency_for_creator', amount: Math.max(0, total - sum) }] : [{ ...value[0], amount: total - half }, { owner: 'agency_for_creator', amount: half }]);
+        }}>+ Split between owners</button>
+        {split && sum !== total && <span className="neg">Shares add up to {formatINR(sum)} of {formatINR(total)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function TdsRegister() {
+  const [fy, setFy] = useState('');
+  const q = useApi<Row>(`/api/finance/tds${fy ? `?fy=${fy}` : ''}`);
+  const [editing, setEditing] = useState<Row | null>(null);
+  useEffect(() => {
+    if (!fy && q.data?.current_fy) setFy(q.data.current_fy);
+  }, [q.data?.current_fy]);
+  return (
+    <div className="stack">
+      <PageHead title="TDS" sub="TDS brands withheld from our payments (whose credit it is, and whether it has reached our 26AS/AIS) and TDS we deducted from creators and editors"
+        actions={<>
+          <select className="input" style={{ width: 'auto' }} aria-label="Financial year" value={fy} onChange={(e) => setFy(e.target.value)}>{(q.data?.fys ?? []).map((f: string) => <option key={f} value={f}>FY {f}</option>)}<option value="all">All years</option></select>
+          <a className="btn" href={`/api/finance/tds?format=csv${fy && fy !== 'all' ? `&fy=${fy}` : ''}`}>CSV</a>
+        </>} />
+      <Async q={q}>{(d) => {
+        const s = d.summary;
+        return (
+          <div className="stack">
+            <div className="grid">
+              <Stat label="Our TDS credit" value={<Money p={s.claimable} />} foot={`${formatINR(s.confirmed)} confirmed in 26AS/AIS · ${formatINR(s.claimed)} claimed`} />
+              <Stat label="Waiting for 26AS / AIS" value={<Money p={s.awaiting} />} foot={s.not_received ? `${formatINR(s.not_received)} not received — follow up` : 'Shows after the brand files its quarterly TDS return'} />
+              <Stat label="Owed to creators from our credit" value={<Money p={s.owed_to_creators} />} foot="Paid out once confirmed in 26AS/AIS" />
+              <Stat label="Claimed by creators" value={<Money p={s.creator_claimed} />} foot="Deducted under their PAN — not ours" />
+              <Stat label="TDS we deducted" value={<Money p={s.deducted_by_us} />} foot={`${formatINR(s.deposited)} deposited · ${formatINR(s.to_deposit)} to deposit (by the 7th)`} />
+            </div>
+            <Card title="TDS deducted by brands" flush>
+              <DataTable rows={d.credits} viewKey="tds-credits" exportName="tds-credits" onRowClick={(r) => r.status !== 'reversed' && setEditing(r)} empty={<Empty title="No TDS recorded for this year" hint="Enter TDS when recording a brand payment, or with “TDS / write-off” on a receivable." />} columns={[
+                { key: 'deducted_on', label: 'Deducted', render: (r) => formatDate(r.deducted_on) },
+                { key: 'payer_name', label: 'Deducted by', filter: true },
+                { key: 'invoice', label: 'For', render: (r) => <Link to={`/finance/receivables/${r.invoice_id}`} onClick={(e) => e.stopPropagation()}>{r.invoice_number ?? r.invoice_label}</Link>, value: (r) => r.invoice_number ?? r.invoice_label },
+                { key: 'quarter', label: 'Quarter', render: (r) => `${r.quarter} · FY ${r.fy}` },
+                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} /> },
+                { key: 'owner', label: 'Whose', filter: true, options: TDS_OWNERS.map(([k]) => k), render: (r) => <span>{TDS_OWNERS.find(([k]) => k === r.owner)?.[1]}{r.creator_name && <div className="small muted">{r.creator_name}{r.owner === 'agency_for_creator' && r.payable_status ? ` · payable ${humanize(r.payable_status)}` : ''}</div>}</span> },
+                { key: 'status', label: 'Status', filter: true, options: Object.keys(TDS_STATUS), render: (r) => <Badge tone={TDS_STATUS[r.status]?.[1]}>{TDS_STATUS[r.status]?.[0] ?? r.status}</Badge> },
+                { key: 'certificate_ref', label: 'Form 16A / certificate' },
+                { key: 'claimed_in', label: 'Claimed in', hidden: true },
+                { key: 'return_due', label: "Brand's TDS return due", hidden: true, render: (r) => formatDate(r.return_due) },
+              ]} />
+            </Card>
+            <Card title="TDS we deducted from payouts" hint="Deposit by the 7th of the following month; each one is a payable to the Income Tax Department" flush>
+              <DataTable rows={d.deducted} viewKey="tds-deducted" exportName="tds-deducted" empty={<Empty title="No TDS deducted this year" />} columns={[
+                { key: 'deducted_on', label: 'Deducted', render: (r) => formatDate(r.deducted_on) },
+                { key: 'deducted_from', label: 'From', filter: true },
+                { key: 'for_description', label: 'On payment for', render: (r) => (r.for_payable ? <Link to={`/finance/payables/${r.for_payable}`}>{r.for_description}</Link> : '—') },
+                { key: 'quarter', label: 'Quarter', render: (r) => (r.quarter ? `${r.quarter} · FY ${r.fy}` : '—') },
+                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} /> },
+                { key: 'due_date', label: 'Deposit by', render: (r) => formatDate(r.due_date) },
+                { key: 'state', label: 'Deposited?', render: (r) => <Link to={`/finance/payables/${r.id}`}><Badge value={r.payment_state} /></Link> },
+              ]} />
+            </Card>
+          </div>
+        );
+      }}</Async>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={`TDS from ${editing?.payer_name ?? ''}`} size="narrow">{editing && <TdsEdit c={editing} onDone={() => (setEditing(null), q.reload(), refreshFinance())} />}</Modal>
+    </div>
+  );
+}
+
+function TdsEdit({ c, onDone }: { c: Row; onDone: () => void }) {
+  const [v, setV] = useState<Row>({ status: c.status, certificate_ref: c.certificate_ref ?? '', claimed_in: c.claimed_in ?? '', notes: c.notes ?? '' });
+  const creator = c.owner === 'creator';
+  return (
+    <div className="stack">
+      <div className="small">{formatINR(c.amount)} withheld on {formatDate(c.deducted_on)} ({c.quarter} · FY {c.fy}). {TDS_OWNERS.find(([k]) => k === c.owner)?.[1]}{c.creator_name ? ` — ${c.creator_name}` : ''}.</div>
+      {!creator && <label className="field"><span>Status</span><select className="input" value={v.status} onChange={(e) => setV({ ...v, status: e.target.value })}>{['expected', 'in_26as', 'claimed', 'not_received'].map((k) => <option key={k} value={k}>{TDS_STATUS[k][0]}</option>)}</select>
+        <span className="hint">Usually shows in 26AS/AIS after the brand files its quarterly TDS return (due {formatDate(c.return_due)}).{c.owner === 'agency_for_creator' ? ' Marking it as in 26AS releases the payable to the creator.' : ''}</span></label>}
+      {!creator && <label className="field"><span>Form 16A / certificate no.</span><input className="input" value={v.certificate_ref} onChange={(e) => setV({ ...v, certificate_ref: e.target.value })} /></label>}
+      {!creator && <label className="field"><span>Claimed in (e.g. ITR for FY {c.fy})</span><input className="input" value={v.claimed_in} onChange={(e) => setV({ ...v, claimed_in: e.target.value })} /></label>}
+      <label className="field"><span>Notes</span><input className="input" value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></label>
+      <div className="row" style={{ justifyContent: 'flex-end' }}><button className="btn primary" onClick={async () => {
+        if (await attempt(() => api(`/api/finance/tds/${c.id}`, { method: 'PATCH', body: creator ? { notes: v.notes || null } : { status: v.status, certificate_ref: v.certificate_ref || null, claimed_in: v.claimed_in || null, notes: v.notes || null } }), 'Saved')) onDone();
+      }}>Save</button></div>
     </div>
   );
 }
