@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { all, get, insert, openDb, type Row, type User } from '../src/server/db.ts';
-import { hashPassword } from '../src/server/app.ts';
+import { createApp, errorHandler, hashPassword } from '../src/server/app.ts';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { seedDemo } from '../src/server/seed.ts';
-import { backfillTdsCredits, forecastInputs, listInvoices, listObligations, payeeStatement, recordTransaction, reverseSettlement, settleNonCash, tdsPeriod, tdsRegister, today, totalCash, updateTdsCredit } from '../src/server/finance.ts';
+import { backfillTdsCredits, campaignFinancials, forecastInputs, listInvoices, listObligations, payeeStatement, recordTransaction, reverseSettlement, settleNonCash, tdsPeriod, tdsRegister, today, totalCash, updateTdsCredit } from '../src/server/finance.ts';
 import { dashboard } from '../src/server/domain.ts';
 
 process.env.HQ_TODAY = '2026-10-07';
@@ -51,12 +54,18 @@ test("split TDS: ours, ours-but-the-creator's (on hold until 26AS), creator clai
   const taxPayablesBefore = all(db, `SELECT id FROM obligations WHERE source LIKE 'tds:%'`).length;
   assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'agency', amount: L(5000) }]), /must add up/);
   assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'agency', amount: L(5000) }, { owner: 'agency_for_creator', amount: L(5000) }]), /Choose the creator/);
-  assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'agency', amount: L(5000) }, { owner: 'creator', amount: L(5000), influencer_id: creator.id, obligation_id: 999999 }]), /open payable/);
+  assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'agency', amount: L(5000) }, { owner: 'creator', amount: L(5000), influencer_id: creator.id, obligation_id: 999999 }]), /fee payable/);
+  assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'agency', amount: L(5000) }, { owner: 'agency_for_creator', amount: L(5000), influencer_id: creator.id }]), /fee payable/, "the creator's share comes out of their fee");
+  assert.throws(() => receive(inv, L(90000), L(10000), [{ owner: 'constructor' as any, amount: L(10000) }]), /Choose whose TDS/);
+  assert.throws(() => receive(inv, L(90000), L(10000), 'all' as any), /Invalid TDS split/);
+  const camp = get(db, 'SELECT campaign_id FROM obligations WHERE id = ?', ob)!.campaign_id;
+  const costBefore = campaignFinancials(db, t(), [camp]).get(camp)!.committed_cost;
   receive(inv, L(90000), L(10000), [
     { owner: 'agency', amount: L(3500) },
-    { owner: 'agency_for_creator', amount: L(4000), influencer_id: creator.id },
+    { owner: 'agency_for_creator', amount: L(4000), influencer_id: creator.id, obligation_id: ob },
     { owner: 'creator', amount: L(2500), influencer_id: creator.id, obligation_id: ob },
   ]);
+  assert.equal(campaignFinancials(db, t(), [camp]).get(camp)!.committed_cost, costBefore, 'creator cost is not counted twice');
   const credits = all(db, 'SELECT * FROM tds_credits WHERE invoice_id = ? ORDER BY id', inv);
   assert.deepEqual(credits.map((c) => [c.owner, c.amount, c.status]), [['agency', L(3500), 'expected'], ['agency_for_creator', L(4000), 'expected'], ['creator', L(2500), 'creator_claims']]);
 
@@ -70,10 +79,13 @@ test("split TDS: ours, ours-but-the-creator's (on hold until 26AS), creator clai
   updateTdsCredit(db, founder, credits[1].id, { status: 'expected' });
   assert.equal(get(db, 'SELECT status FROM obligations WHERE id = ?', passOn.id)!.status, 'on_hold', 'goes back on hold while unpaid');
 
-  // Deducted under the creator's PAN: we owe them less, and we have nothing to deposit.
+  // The creator is owed the same total: part of the fee is held back, part was deducted under their PAN.
   const fee = listObligations(db, t(), { ids: [ob] })[0];
-  assert.equal(fee.outstanding, L(65000 - 2500));
+  assert.equal(fee.outstanding, L(65000 - 4000 - 2500));
   assert.equal(fee.tds, L(2500));
+  assert.equal(fee.written_off, L(4000), 'held-back part moved to the pass-on payable');
+  assert.equal(fee.amount - fee.written_off + passOn.amount, L(65000));
+  assert.throws(() => reverseSettlement(db, founder, credits[1].creator_settlement_id, 'x'), /Reverse that TDS on the brand receivable/);
   assert.equal(all(db, `SELECT id FROM obligations WHERE source LIKE 'tds:%'`).length, taxPayablesBefore, 'no TDS deposit created for TDS the brand deducted');
   assert.ok(payeeStatement(db, t(), 'influencer', creator.id).payments.some((p: Row) => p.kind === 'tds' && p.amount === L(2500)));
   assert.throws(() => updateTdsCredit(db, founder, credits[2].id, { status: 'claimed' }), /creator claims/);
@@ -87,13 +99,13 @@ test("split TDS: ours, ours-but-the-creator's (on hold until 26AS), creator clai
 test('reversing the brand TDS undoes everything it caused, unless the creator was already paid', () => {
   const { inv, ob, creator } = fixture();
   receive(inv, L(90000), L(10000), [
-    { owner: 'agency_for_creator', amount: L(6000), influencer_id: creator.id },
+    { owner: 'agency_for_creator', amount: L(6000), influencer_id: creator.id, obligation_id: ob },
     { owner: 'creator', amount: L(4000), influencer_id: creator.id, obligation_id: ob },
   ]);
   const sid = get(db, `SELECT id FROM settlements WHERE invoice_id = ? AND kind = 'tds'`, inv)!.id;
   const credits = all(db, 'SELECT * FROM tds_credits WHERE settlement_id = ? ORDER BY id', sid);
   const creatorSettlement = credits[1].creator_settlement_id;
-  assert.throws(() => reverseSettlement(db, founder, creatorSettlement, 'oops'), /Reverse it from the brand receivable/);
+  assert.throws(() => reverseSettlement(db, founder, creatorSettlement, 'oops'), /Reverse that TDS on the brand receivable/);
   reverseSettlement(db, founder, sid, 'Brand corrected its TDS');
   assert.ok(all(db, 'SELECT status FROM tds_credits WHERE settlement_id = ?', sid).every((c) => c.status === 'reversed'));
   assert.equal(get(db, 'SELECT status FROM obligations WHERE id = ?', credits[0].obligation_id)!.status, 'cancelled');
@@ -102,11 +114,23 @@ test('reversing the brand TDS undoes everything it caused, unless the creator wa
 
   // Once the creator has been paid the pass-on amount, the brand TDS cannot silently disappear.
   const again = fixture();
-  settleNonCash(db, founder, { invoice_id: again.inv, kind: 'tds', amount: L(5000), settled_on: '2026-10-05', reason: 'TDS per brand certificate', tds_split: [{ owner: 'agency_for_creator', amount: L(5000), influencer_id: again.creator.id }] });
+  settleNonCash(db, founder, { invoice_id: again.inv, kind: 'tds', amount: L(5000), settled_on: '2026-10-05', reason: 'TDS per brand certificate', tds_split: [{ owner: 'agency_for_creator', amount: L(5000), influencer_id: again.creator.id, obligation_id: again.ob }] });
   const c = get(db, 'SELECT * FROM tds_credits WHERE invoice_id = ?', again.inv)!;
   updateTdsCredit(db, founder, c.id, { status: 'in_26as' });
   recordTransaction(db, founder, { account_id: bank, txn_date: '2026-10-06', direction: 'out', amount: L(5000), category: 'creator_payout', reference: `UTR-${Math.random()}`, allocations: [{ obligation_id: c.obligation_id, amount: L(5000) }] });
   assert.throws(() => reverseSettlement(db, founder, c.settlement_id, 'x'), /already been paid/);
+  const reg = tdsRegister(db, null);
+  assert.equal(reg.credits.find((x: Row) => x.id === c.id).payable_state, 'settled');
+  assert.ok(!reg.credits.some((x: Row) => x.id === c.id && x.payable_outstanding > 0), 'paid pass-on no longer counted as owed');
+});
+
+test('TDS we already deposited cannot be silently reversed', () => {
+  const { ob } = fixture();
+  recordTransaction(db, founder, { account_id: bank, txn_date: '2026-10-05', direction: 'out', amount: L(58500), category: 'creator_payout', reference: `UTR-${Math.random()}`, allocations: [{ obligation_id: ob, amount: L(58500), tds: L(6500) }] });
+  const sid = get(db, `SELECT id FROM settlements WHERE obligation_id = ? AND kind = 'tds'`, ob)!.id;
+  const dep = get(db, 'SELECT id FROM obligations WHERE source = ?', `tds:${sid}`)!.id;
+  recordTransaction(db, founder, { account_id: bank, txn_date: '2026-10-06', direction: 'out', amount: L(6500), category: 'tax_payment', reference: `CHALLAN-${Math.random()}`, allocations: [{ obligation_id: dep, amount: L(6500) }] });
+  assert.throws(() => reverseSettlement(db, founder, sid, 'wrong rate'), /already been deposited/);
 });
 
 test('dashboard reminds to check 26AS after the brand\'s TDS return date, and flags missing credits', () => {
@@ -130,4 +154,26 @@ test('TDS recorded before the register existed is backfilled once as ours, to be
   assert.equal(backfillTdsCredits(db), 0, 'idempotent');
   const c = get(db, 'SELECT * FROM tds_credits WHERE settlement_id = ?', sid)!;
   assert.deepEqual([c.owner, c.status, c.quarter, c.fy], ['agency', 'expected', 'Q2', '2026-27']);
+});
+
+test('a receivable with brand TDS cannot be cancelled until that TDS is reversed', async () => {
+  const app = createApp(db, { dataDir: mkdtempSync(join(tmpdir(), 'hq-tds-')) });
+  app.use(errorHandler);
+  const server = await new Promise<any>((r) => { const s = app.listen(0, () => r(s)); });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const login = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hq': '1' }, body: JSON.stringify({ email: 'f@test.in', password: 'founder-password' }) });
+    const cookie = login.headers.get('set-cookie')!.split(';')[0];
+    const call = (path: string, body: Row) => fetch(`${base}${path}`, { method: 'POST', headers: { cookie, 'x-hq': '1', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const { inv, ob, creator } = fixture();
+    assert.equal((await call('/api/finance/settlements', { invoice_id: inv, kind: 'tds', amount: L(3000), settled_on: '2026-10-05', reason: 'TDS', tds_split: [{ owner: 'creator', amount: L(3000), influencer_id: creator.id, obligation_id: ob }] })).status, 201);
+    const blocked = await call(`/api/finance/invoices/${inv}/cancel`, { reason: 'Brand cancelled' });
+    assert.equal(blocked.status, 400);
+    assert.match((await blocked.json()).error, /Reverse that TDS first/);
+    assert.equal((await call(`/api/finance/obligations/${ob}/cancel`, { reason: 'x' })).status, 400, 'the creator fee it reduced cannot be cancelled either');
+    const bad = await call('/api/finance/settlements', { invoice_id: inv, kind: 'tds', amount: L(1000), settled_on: '2026-10-05', reason: 'TDS', tds_split: [{ owner: 'creator', amount: L(1000), influencer_id: creator.id, obligation_id: 'abc' }] });
+    assert.equal(bad.status, 400, 'bad ids are a clear 400, not a server error');
+  } finally {
+    server.close();
+  }
 });

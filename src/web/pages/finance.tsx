@@ -625,8 +625,8 @@ function Adjust({ target, kinds, max, onDone }: { target: Row; kinds: string[]; 
 
 const TDS_OWNERS: [string, string, string][] = [
   ['agency', 'Ours — we claim it', 'Tracked under Finance → TDS until it shows in our 26AS/AIS and is claimed.'],
-  ['agency_for_creator', "We claim it, but it's the creator's money", 'Creates a payable to the creator for this amount, on hold until the credit shows in our 26AS/AIS.'],
-  ['creator', 'Creator claims it (deducted under their PAN)', 'Reduces what we owe the creator. The brand deposits it for them, so we deposit nothing.'],
+  ['agency_for_creator', "We claim it, but it's the creator's money", "Holds this much of the creator's fee back in a separate payable, released once the credit shows in our 26AS/AIS. The creator is owed the same total."],
+  ['creator', 'Creator claims it (deducted under their PAN)', "Reduces the creator's fee by this amount. The brand deposits it for them, so we deposit nothing."],
 ];
 const TDS_STATUS: Record<string, [string, string]> = {
   expected: ['Waiting for 26AS', 'warn'], in_26as: ['In 26AS / AIS', 'info'], claimed: ['Claimed', 'good'], not_received: ['Not in 26AS — follow up', 'bad'],
@@ -641,7 +641,7 @@ function tdsSplit(shares: Row[] | undefined, total: number) {
 
 function TdsOwnership({ total, value, onChange }: { total: number; value: Row[]; onChange: (v: Row[]) => void }) {
   const creators = useOptions('influencers');
-  const payables = useApi<{ rows: Row[] }>(value.some((s) => s.owner === 'creator') ? '/api/finance/payables?open=1' : null);
+  const payables = useApi<{ rows: Row[] }>(value.some((s) => s.owner !== 'agency') ? '/api/finance/payables?open=1' : null);
   const split = value.length > 1;
   const sum = value.reduce((a, s) => a + (s.amount ?? 0), 0);
   const set = (i: number, patch: Row) => onChange(value.map((s, j) => (j === i ? { ...s, ...patch } : s)));
@@ -651,12 +651,12 @@ function TdsOwnership({ total, value, onChange }: { total: number; value: Row[];
         <div key={i} className="stack tight">
           <div className="row">
             <select className="input" style={{ width: 'auto' }} aria-label="Whose TDS" value={s.owner} onChange={(e) => set(i, { owner: e.target.value, obligation_id: null })}>{TDS_OWNERS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-            {split && <span style={{ width: 150 }}><MoneyField value={s.amount ?? null} onChange={(p) => set(i, { amount: p })} label="Share" /></span>}
+            {split && <span style={{ width: 150 }}><MoneyField value={s.amount ?? null} onChange={(p) => set(i, { amount: p })} label="Share" invalid={!(s.amount > 0)} /></span>}
             {s.owner !== 'agency' && <select className="input" style={{ width: 'auto' }} aria-label="Creator" value={s.influencer_id ?? ''} onChange={(e) => set(i, { influencer_id: Number(e.target.value) || null, obligation_id: null })}><option value="">Which creator…</option>{creators.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select>}
-            {s.owner === 'creator' && s.influencer_id && (
-              <select className="input" style={{ width: 'auto' }} aria-label="Payable to reduce" value={s.obligation_id ?? ''} onChange={(e) => set(i, { obligation_id: Number(e.target.value) || null })}>
-                <option value="">Reduce which payable…</option>
-                {(payables.data?.rows ?? []).filter((o) => o.influencer_id === s.influencer_id && o.status !== 'cancelled' && o.outstanding > 0).map((o) => <option key={o.id} value={o.id}>{o.description} — {formatINR(o.outstanding)} owed</option>)}
+            {s.owner !== 'agency' && s.influencer_id && (
+              <select className="input" style={{ width: 'auto' }} aria-label="Creator fee payable" value={s.obligation_id ?? ''} onChange={(e) => set(i, { obligation_id: Number(e.target.value) || null })}>
+                <option value="">Which fee payable…</option>
+                {(payables.data?.rows ?? []).filter((o) => o.influencer_id === s.influencer_id && !['cancelled', 'on_hold'].includes(o.status) && !String(o.source ?? '').startsWith('tdscredit:') && o.outstanding > 0).map((o) => <option key={o.id} value={o.id}>{o.description} — {formatINR(o.outstanding)} owed</option>)}
               </select>
             )}
             {split && <button className="btn ghost sm" onClick={() => onChange(value.filter((_, j) => j !== i))}>Remove</button>}
@@ -666,10 +666,17 @@ function TdsOwnership({ total, value, onChange }: { total: number; value: Row[];
       ))}
       <div className="row small">
         <button className="btn ghost sm" onClick={() => {
-          const half = Math.round(total / 2 / 100) * 100; // whole rupees
-          onChange(split ? [...value, { owner: 'agency_for_creator', amount: Math.max(0, total - sum) }] : [{ ...value[0], amount: total - half }, { owner: 'agency_for_creator', amount: half }]);
+          // A new share takes half of the last one (or of the remainder), so no share starts at zero.
+          const halve = (n: number) => (n >= 200 ? Math.round(n / 2 / 100) * 100 : Math.floor(n / 2));
+          if (!split) return onChange([{ ...value[0], amount: total - halve(total) }, { owner: 'agency_for_creator', amount: halve(total) }]);
+          const rest = total - sum;
+          if (rest > 0) return onChange([...value, { owner: 'agency_for_creator', amount: rest }]);
+          const last = value[value.length - 1];
+          const give = halve(last.amount ?? 0);
+          onChange([...value.slice(0, -1), { ...last, amount: (last.amount ?? 0) - give }, { owner: 'agency_for_creator', amount: give }]);
         }}>+ Split between owners</button>
         {split && sum !== total && <span className="neg">Shares add up to {formatINR(sum)} of {formatINR(total)}</span>}
+        {split && value.some((s) => !(s.amount > 0)) && <span className="neg">Every share needs an amount</span>}
       </div>
     </div>
   );
@@ -696,7 +703,7 @@ function TdsRegister() {
             <div className="grid">
               <Stat label="Our TDS credit" value={<Money p={s.claimable} />} foot={`${formatINR(s.confirmed)} confirmed in 26AS/AIS · ${formatINR(s.claimed)} claimed`} />
               <Stat label="Waiting for 26AS / AIS" value={<Money p={s.awaiting} />} foot={s.not_received ? `${formatINR(s.not_received)} not received — follow up` : 'Shows after the brand files its quarterly TDS return'} />
-              <Stat label="Owed to creators from our credit" value={<Money p={s.owed_to_creators} />} foot="Paid out once confirmed in 26AS/AIS" />
+              <Stat label="Still owed to creators from our credit" value={<Money p={s.owed_to_creators} />} foot="Held back from their fees; paid once confirmed in 26AS/AIS" />
               <Stat label="Claimed by creators" value={<Money p={s.creator_claimed} />} foot="Deducted under their PAN — not ours" />
               <Stat label="TDS we deducted" value={<Money p={s.deducted_by_us} />} foot={`${formatINR(s.deposited)} deposited · ${formatINR(s.to_deposit)} to deposit (by the 7th)`} />
             </div>
@@ -706,9 +713,9 @@ function TdsRegister() {
                 { key: 'payer_name', label: 'Deducted by', filter: true },
                 { key: 'invoice', label: 'For', render: (r) => <Link to={`/finance/receivables/${r.invoice_id}`} onClick={(e) => e.stopPropagation()}>{r.invoice_number ?? r.invoice_label}</Link>, value: (r) => r.invoice_number ?? r.invoice_label },
                 { key: 'quarter', label: 'Quarter', render: (r) => `${r.quarter} · FY ${r.fy}` },
-                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} /> },
-                { key: 'owner', label: 'Whose', filter: true, options: TDS_OWNERS.map(([k]) => k), render: (r) => <span>{TDS_OWNERS.find(([k]) => k === r.owner)?.[1]}{r.creator_name && <div className="small muted">{r.creator_name}{r.owner === 'agency_for_creator' && r.payable_status ? ` · payable ${humanize(r.payable_status)}` : ''}</div>}</span> },
-                { key: 'status', label: 'Status', filter: true, options: Object.keys(TDS_STATUS), render: (r) => <Badge tone={TDS_STATUS[r.status]?.[1]}>{TDS_STATUS[r.status]?.[0] ?? r.status}</Badge> },
+                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} />, csv: (r) => paiseToRupeesString(r.amount) },
+                { key: 'owner', label: 'Whose', filter: true, options: TDS_OWNERS.map(([k]) => k), csv: (r) => TDS_OWNERS.find(([k]) => k === r.owner)?.[1] ?? r.owner, render: (r) => <span>{TDS_OWNERS.find(([k]) => k === r.owner)?.[1]}{r.creator_name && <div className="small muted">{r.creator_name}{r.owner === 'agency_for_creator' && r.payable_state ? ` · ${r.payable_state === 'on_hold' ? 'held until confirmed' : r.payable_state === 'settled' ? 'paid to creator' : `payable ${humanize(r.payable_state)}`}` : ''}</div>}</span> },
+                { key: 'status', label: 'Status', filter: true, options: Object.keys(TDS_STATUS), csv: (r) => TDS_STATUS[r.status]?.[0] ?? r.status, render: (r) => <Badge tone={TDS_STATUS[r.status]?.[1]}>{TDS_STATUS[r.status]?.[0] ?? r.status}</Badge> },
                 { key: 'certificate_ref', label: 'Form 16A / certificate' },
                 { key: 'claimed_in', label: 'Claimed in', hidden: true },
                 { key: 'return_due', label: "Brand's TDS return due", hidden: true, render: (r) => formatDate(r.return_due) },
@@ -720,9 +727,9 @@ function TdsRegister() {
                 { key: 'deducted_from', label: 'From', filter: true },
                 { key: 'for_description', label: 'On payment for', render: (r) => (r.for_payable ? <Link to={`/finance/payables/${r.for_payable}`}>{r.for_description}</Link> : '—') },
                 { key: 'quarter', label: 'Quarter', render: (r) => (r.quarter ? `${r.quarter} · FY ${r.fy}` : '—') },
-                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} /> },
+                { key: 'amount', label: 'TDS', num: true, render: (r) => <Money p={r.amount} />, csv: (r) => paiseToRupeesString(r.amount) },
                 { key: 'due_date', label: 'Deposit by', render: (r) => formatDate(r.due_date) },
-                { key: 'state', label: 'Deposited?', render: (r) => <Link to={`/finance/payables/${r.id}`}><Badge value={r.payment_state} /></Link> },
+                { key: 'payment_state', label: 'Deposited?', filter: true, render: (r) => <Link to={`/finance/payables/${r.id}`}><Badge value={r.payment_state} /></Link> },
               ]} />
             </Card>
           </div>

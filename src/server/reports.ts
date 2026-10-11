@@ -688,7 +688,7 @@ function payeeReport(c: Ctx, kind: 'influencer' | 'editor'): Built {
   const s = payeeStatement(c.db, c.today, kind, id);
   const paysInPeriod = s.payments.filter((p: Row) => p.settled_on >= c.from && p.settled_on <= c.to);
   const content: Content[] = [h2('Amounts owed'), table([{ label: 'For', key: 'description' }, { label: 'Campaign', key: 'campaign_name' }, { label: 'Due', key: 'd' }, { label: 'Amount', key: 'amount', money: true }, { label: 'Paid', key: 'paid', money: true }, { label: 'TDS', key: 'tds', money: true }, { label: 'Outstanding', key: 'outstanding', money: true }], s.obligations.map((o: Row) => ({ ...o, d: formatDate(o.due_date) }))),
-    h2('Payments in period'), table([{ label: 'Date', key: 'd' }, { label: 'For', key: 'description' }, { label: 'Type', key: 'k' }, { label: 'Reference', key: 'reference' }, { label: 'Amount', key: 'amount', money: true }], paysInPeriod.map((p: Row) => ({ ...p, d: formatDate(p.settled_on), k: p.kind === 'tds' ? 'TDS deducted' : 'Bank payment' })))];
+    h2('Payments in period'), table([{ label: 'Date', key: 'd' }, { label: 'For', key: 'description' }, { label: 'Type', key: 'k' }, { label: 'Reference', key: 'reference' }, { label: 'Amount', key: 'amount', money: true }], paysInPeriod.map((p: Row) => ({ ...p, d: formatDate(p.settled_on), k: p.kind === 'cash' ? 'Bank payment' : p.kind === 'tds' ? (p.brand_tds_owner === 'creator' ? `TDS deducted by ${p.brand_tds_by} (your PAN)` : 'TDS deducted') : p.brand_tds_owner === 'agency_for_creator' ? 'Held until our TDS credit is confirmed' : humanize(p.kind) })))];
   if (kind === 'editor') {
     const tasks = all(c.db, `SELECT title, stage, delivered_at FROM content_tasks WHERE editor_id = ? AND delivered_at BETWEEN ? AND ?`, id, c.from, `${c.to}T23:59:59Z`);
     content.push(h2('Work delivered in period'), table([{ label: 'Task', key: 'title' }, { label: 'Delivered', key: 'd' }], tasks.map((t) => ({ ...t, d: formatDate(t.delivered_at) }))));
@@ -697,7 +697,7 @@ function payeeReport(c: Ctx, kind: 'influencer' | 'editor'): Built {
     title: `${kind === 'influencer' ? 'Creator payment statement' : 'Editor payment summary'} — ${who.name}`,
     subtitle: 'Amounts owed, payments made and tax deducted',
     recipient: who.name,
-    summary: [`Total owed ${money(s.total_owed)}; paid ${money(s.total_paid)}; TDS deducted ${money(s.total_tds)}; outstanding ${money(s.outstanding)}.`],
+    summary: [`Total owed ${money(s.total_owed)}; paid ${money(s.total_paid)}; TDS deducted ${money(s.total_tds)}${s.tds_by_brand ? ` (of which ${money(s.tds_by_brand)} by brands under your PAN)` : ''}; outstanding ${money(s.outstanding)}.`],
     content,
     csv: [{ name: 'Payments', columns: [{ label: 'Date', key: 'settled_on' }, { label: 'For', key: 'description' }, { label: 'Type', key: 'kind' }, { label: 'Amount', key: 'amount', money: true }], rows: s.payments }],
     data: { total_owed: s.total_owed, total_paid: s.total_paid, outstanding: s.outstanding },

@@ -203,7 +203,7 @@ export function financeRoutes(app: Express) {
         { key: 'creator_name', label: 'Creator' }, { key: 'status', label: 'Status' }, { key: 'certificate_ref', label: 'Form 16A / certificate' }, { key: 'claimed_in', label: 'Claimed in' }, { key: 'notes', label: 'Notes' },
       ]));
     }
-    const fys = all(req.db, 'SELECT DISTINCT fy FROM tds_credits WHERE fy IS NOT NULL').map((r) => r.fy);
+    const fys = [...all(req.db, 'SELECT DISTINCT fy FROM tds_credits WHERE fy IS NOT NULL').map((r) => r.fy), ...tdsRegister(req.db, null).deducted.map((o) => o.fy).filter(Boolean)];
     res.json({ ...reg, fy, current_fy: tdsPeriod(today(req.db)).fy, fys: [...new Set([tdsPeriod(today(req.db)).fy, ...fys])].sort().reverse(), owners: TDS_OWNER_LABEL });
   });
 
@@ -258,6 +258,13 @@ export function financeRoutes(app: Express) {
         if (!row) throw new HttpError(404, 'Not found');
         if (get(req.db, `SELECT id FROM settlements WHERE ${kind === 'invoices' ? 'invoice_id' : 'obligation_id'} = ? AND kind = 'cash' AND reversed_at IS NULL`, id)) {
           throw new HttpError(400, 'Payments are recorded against this. Reverse or re-allocate them first.');
+        }
+        // Brand TDS changes creator payables; undo it on the receivable first so nothing is left half-applied.
+        if (kind === 'invoices' && get(req.db, `SELECT id FROM tds_credits WHERE invoice_id = ? AND status <> 'reversed'`, id)) {
+          throw new HttpError(400, 'TDS withheld by the brand is recorded against this receivable. Reverse that TDS first (it also undoes any creator payables it changed).');
+        }
+        if (kind === 'obligations' && get(req.db, `SELECT c.id FROM tds_credits c JOIN settlements s ON s.id = c.creator_settlement_id WHERE s.obligation_id = ? AND c.status <> 'reversed' AND s.reversed_at IS NULL`, id)) {
+          throw new HttpError(400, 'Brand TDS is applied to this payable. Reverse that TDS on the brand receivable first.');
         }
         run(req.db, `UPDATE ${kind} SET status = 'cancelled', cancel_reason = ?, updated_at = ? WHERE id = ?`, reason, new Date().toISOString(), id);
         if (kind === 'obligations') run(req.db, `UPDATE earmarks SET status = 'released', ended_at = ?, end_reason = 'Payable cancelled' WHERE obligation_id = ? AND status = 'active'`, new Date().toISOString(), id);
