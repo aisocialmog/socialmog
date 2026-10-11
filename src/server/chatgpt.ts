@@ -8,7 +8,7 @@
 import type { Express, Request } from 'express';
 import { randomBytes } from 'node:crypto';
 import { addDays, formatDate, formatDateTime, formatPeriod, isIsoDate, partsInTz, weekStart } from '../shared/dates.ts';
-import { can, ENTITY, PLATFORMS, type Cap } from '../shared/schema.ts';
+import { can, ENTITIES, ENTITY, PLATFORMS, type Cap } from '../shared/schema.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, tx, update, type Db, type Row, type User } from './db.ts';
 import { clean, founders, linkFor, notify, requireUser, scopeFor } from './app.ts';
 import { afterWrite, beforeWrite, campaignHealth, dashboard, editorWorkload, reliability, shortlist } from './domain.ts';
@@ -328,7 +328,17 @@ export const TYPES: Record<string, TypeDef> = {
     build: (c) => {
       const infs = pickRows(c, 'influencers', '0');
       return {
-        records: { influencers: infs.map((i) => ({ ...creatorContext(c, i, false), posts_on_record: get(c.db, 'SELECT COUNT(*) n FROM posts WHERE influencer_id = ? AND archived_at IS NULL', i.id)!.n })) },
+        // Only what identifies the public profile: this workflow browses third-party pages, so no deals, conflicts, audience or availability.
+        records: {
+          influencers: infs.map((raw) => {
+            const i = decode('influencers', raw)!;
+            return {
+              ref: v(c, 'influencers', raw), name: i.name, handle: i.handle, city: i.city, state: i.state, languages: i.languages, niches: i.niches,
+              platforms: (i.platforms ?? []).map((p: Row) => ({ platform: p.platform, username: handleOf(p.handle), profile_url: p.url ?? null, followers: p.followers ?? null, as_of: p.updated_at ?? null })),
+              posts_on_record: get(c.db, 'SELECT COUNT(*) n FROM posts WHERE influencer_id = ? AND archived_at IS NULL', i.id)!.n,
+            };
+          }),
+        },
         links: c.links,
         platform_accounts: platformAccounts(c, infs),
       };
@@ -530,9 +540,38 @@ export function canUse(user: User, type: string): boolean {
   return user.role !== 'editor' && can(user.role, typeOf(type).cap) && can(user.role, 'staff');
 }
 
-/** Instagram/YouTube profile link → platform + handle; matched to a creator only on an exact handle or link (never guessed). */
-const normUrl = (u: string) => u.trim().replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase();
+/** Instagram/YouTube profile link → platform + handle; matched to a creator only on the same platform's exact handle or link (never guessed). */
+const bare = (u: string) => u.trim().replace(/^https?:\/\/(www\.|m\.)?/i, '').replace(/\/+$/, '');
+const normUrl = (u: string) => bare(u.replace(/[?#].*$/, '')).toLowerCase();
 const webUrl = (u: unknown) => (typeof u === 'string' && /^https?:\/\//i.test(u.trim()) ? u.trim() : null);
+const HOSTS: Record<string, RegExp> = { instagram: /(^|\.)instagram\.com$/, youtube: /(^|\.)(youtube\.com|youtu\.be)$/ };
+/** A channel or post link is kept only on its platform's own site (an "Instagram" link to another domain is dropped). */
+function platformUrl(platform: string, u: unknown): string | null {
+  const w = webUrl(u);
+  try {
+    return w && (!HOSTS[platform] || HOSTS[platform].test(new URL(w).hostname)) ? w : null;
+  } catch {
+    return null;
+  }
+}
+/** Post link without tracking parameters (YouTube's ?v= is kept); its key ignores scheme, www. and the trailing slash. */
+function postUrl(u: string): string {
+  const x = new URL(u);
+  const id = x.searchParams.get('v');
+  x.search = id ? `?v=${id}` : '';
+  x.hash = '';
+  return x.toString();
+}
+const postKey = (u: string | null | undefined) => {
+  try {
+    return u ? bare(postUrl(u)) : null;
+  } catch {
+    return u ?? null;
+  }
+};
+const PROFILE_METRICS = ['views', 'likes', 'comments'];
+const isoTs = (s: unknown) => (typeof s === 'string' && isIsoDate(s.slice(0, 10)) && !Number.isNaN(Date.parse(s)) ? new Date(s).toISOString() : null);
+
 export function parseProfileLink(raw: string): { link: string; platform: string; handle: string | null } {
   const link = String(raw).trim();
   if (!/^https?:\/\//i.test(link) || link.length > 500) throw new HttpError(400, `"${link.slice(0, 60)}" is not a web link`);
@@ -549,12 +588,46 @@ export function parseProfileLink(raw: string): { link: string; platform: string;
   return { link, platform: 'other', handle: null };
 }
 
-function creatorsMatching(db: Db, handles: string[], urls: string[]): Row[] {
-  if (!handles.length && !urls.length) return [];
+interface Ident { platform: string; handle: string | null; url: string | null }
+const linkIdent = (raw: unknown): Ident | null => {
+  try {
+    const l = parseProfileLink(String(raw));
+    return { platform: l.platform, handle: l.handle, url: normUrl(l.link) };
+  } catch {
+    return null;
+  }
+};
+/** The channels a ChatGPT profile claims: its link plus each platform entry. */
+const profileIdents = (p: Row): Ident[] =>
+  [linkIdent(p.link), ...((p.platforms ?? []) as Row[]).map((x) => ({ platform: x.platform, handle: handleOf(x.username), url: platformUrl(x.platform, x.profile_url) ? normUrl(x.profile_url) : null }))]
+    .filter((w): w is Ident => !!w && !!(w.handle || w.url));
+const sameChannel = (c: Row, w: Ident) => (!!w.handle && handleOf(c.handle) === w.handle) || (!!w.url && !!c.url && normUrl(c.url) === w.url);
+/** The stored channel an imported one updates: same platform and handle or link, else the platform's only channel when it has neither. */
+function storedChannel(list: Row[], w: Ident): Row | undefined {
+  const same = list.filter((c) => c.platform === w.platform);
+  return same.find((c) => sameChannel(c, w)) ?? (same.length === 1 && !same[0].handle && !same[0].url ? same[0] : undefined);
+}
+
+/** Creators with the same handle or link on the same platform (the primary handle counts only when no channel of that platform is recorded). */
+function creatorsMatching(db: Db, idents: Ident[]): Row[] {
+  if (!idents.length) return [];
   return all(db, 'SELECT id, name, handle, platforms FROM influencers WHERE archived_at IS NULL').filter((i) => {
     const plats = JSON.parse(i.platforms ?? '[]') as Row[];
-    return [handleOf(i.handle), ...plats.map((p) => handleOf(p.handle))].some((h) => h && handles.includes(h)) || plats.some((p) => p.url && urls.includes(normUrl(p.url)));
+    return idents.some((w) => {
+      const same = plats.filter((c) => (w.platform === 'other' || c.platform === w.platform) && (c.handle || c.url));
+      return same.some((c) => sameChannel(c, w)) || (!same.length && !!w.handle && handleOf(i.handle) === w.handle);
+    });
   });
+}
+
+/** Why a profile cannot be this creator: a channel on the same platform is recorded with a different handle and link. */
+function identityClash(inf: Row, idents: Ident[]): string | null {
+  const plats = JSON.parse(inf.platforms ?? '[]') as Row[];
+  for (const w of idents) {
+    const known = plats.filter((c) => c.platform === w.platform && ((w.handle && c.handle) || (w.url && c.url)));
+    if (known.length && !known.some((c) => sameChannel(c, w))) return `${inf.name}'s ${w.platform} is ${known.map((c) => (c.handle ? `@${handleOf(c.handle)}` : c.url)).join(', ')}, but this profile is ${w.handle ? `@${w.handle}` : w.url}`;
+  }
+  return null;
 }
 
 export function createExport(db: Db, user: User, input: { type: string; ids?: number[]; extra_ids?: number[]; links?: string[]; from?: string; to?: string; questions?: string[]; trigger?: string }): string {
@@ -573,12 +646,16 @@ export function createExport(db: Db, user: User, input: { type: string; ids?: nu
     if (!s) throw new HttpError(403, 'Not allowed');
   }
   const questions = (input.questions?.length ? input.questions : t.questions).map((q) => String(q).trim().slice(0, 500)).filter(Boolean).slice(0, 20);
-  const raw = t.profiles ? [...new Set((input.links ?? []).map((x) => String(x).trim()).filter(Boolean))] : [];
-  if (raw.length > 30) throw new HttpError(400, 'Up to 30 links per package');
-  const links = raw.map((x) => {
-    const l = parseProfileLink(x);
-    const match = creatorsMatching(db, l.handle ? [l.handle] : [], [normUrl(l.link)]);
-    // Exactly one creator with this handle or link is an exact match; several is ambiguous and left for the import review.
+  // The same profile pasted twice (with ?hl=, without www., another case…) is one link.
+  const seen = new Set<string>();
+  const uniq = (t.profiles ? (input.links ?? []).map((x) => String(x).trim()).filter(Boolean).slice(0, 200) : []).map(parseProfileLink).filter((l) => {
+    const k = l.handle ? `${l.platform}:${l.handle}` : normUrl(l.link);
+    return !seen.has(k) && !!seen.add(k);
+  });
+  if (uniq.length > 30) throw new HttpError(400, 'Up to 30 links per package');
+  const links = uniq.map((l) => {
+    const match = creatorsMatching(db, [linkIdent(l.link)!]);
+    // Exactly one creator with this handle or link on the same platform is an exact match; several is ambiguous and left for the import review.
     if (match.length === 1 && !ids.includes(match[0].id)) ids.push(match[0].id);
     return { ...l, matched: match.length === 1 ? `influencers:${match[0].id}` : null, ambiguous: match.length > 1 ? match.map((m) => `influencers:${m.id}`) : undefined };
   });
@@ -657,7 +734,7 @@ export function buildPrompt(exp: Row, mode: 'standard' | 'connector', inline = f
   if (t.profiles) {
     lines.push(
       'Creator profiles:',
-      '- Return one entry in "profiles" for every link in "links" and every creator in records.influencers. Set "link" to the link you were given (or the creator\'s main profile link).',
+      '- Return ONE entry in "profiles" per creator: links that belong to the same person (for example their Instagram and their YouTube) go in a single entry with all their channels in "platforms". Cover every link in "links" and every creator in records.influencers. Set "link" to one of the links you were given for that creator (or their main profile link).',
       '- Set "record" to the exact Socialmog reference for creators already in the package (a link with "matched" uses that reference). Use record null for a creator who is not in Socialmog yet. Never invent references.',
       '- Open each link with web browsing. If Instagram or YouTube asks you to log in or blocks you, use an analytics connector I have authorised in ChatGPT (for example Windsor.ai) if one is available; otherwise ask me to upload screenshots of the profile header and of the recent posts/videos with their view counts, and read the numbers only from what is visible.',
       '- Fill name, handle, city, state, languages, categories (content niches such as beauty, food, tech) and a business email only if it is shown publicly. List every field you inferred from the content rather than read on the profile in "inferred_fields".',
@@ -800,7 +877,7 @@ function buildPreview(db: Db, user: User, exp: Row, result: Row) {
     });
     const storable = weekly && ['retrieved', 'partial'].includes(m.status) && metrics.some((x) => x.imported !== null);
     if (!weekly) issues.push('Period is not a Monday–Sunday week: saved with the analysis only, not as a weekly snapshot');
-    return { index, record: m.record, resolved: res && !res.error ? { ref: res.ref, label: res.label, link: res.link } : null, unresolved, platform: m.platform, username: m.username, profile_url: m.profile_url, source: m.source, retrieved_at: m.retrieved_at, period: m.period, granularity: m.granularity, status: m.status, units: m.units, issues, weekly, snapshot_exists: !!existing && !existing.archived_at, metrics, content, storable, permitted: can(user.role, 'talent') };
+    return { index, record: m.record, resolved: res && !res.error ? { ref: res.ref, label: res.label, link: res.link } : null, unresolved, platform: m.platform, username: m.username, profile_url: m.profile_url, source: m.source, retrieved_at: isoTs(m.retrieved_at), period: m.period, granularity: m.granularity, status: m.status, units: m.units, issues, weekly, snapshot_exists: !!existing && !existing.archived_at, metrics, content, storable, permitted: can(user.role, 'talent') };
   });
 
   const changes = (result.proposed_changes ?? []).map((ch: Row) => {
@@ -844,19 +921,33 @@ function buildPreview(db: Db, user: User, exp: Row, result: Row) {
     return out;
   });
 
-  // Creator profiles (from links): matched only by explicit reference; a "new" creator whose handle or link already exists must be decided by the user.
+  // Creator profiles (from links): an existing creator only by explicit reference whose channels agree; a profile that shares a
+  // handle or link with a creator, or with an earlier profile in this result, is left for the user to decide.
+  const taken: string[][] = [];
   const profiles = (result.profiles ?? []).map((p: Row, index: number) => {
     const res = p.record ? r(p.record) : null;
+    const idents = profileIdents(p);
+    const matches = creatorsMatching(db, idents);
+    const issues: string[] = [...(p.issues ?? [])];
     let problem: string | null = null;
     if (p.record) {
       if (!res || res.error) problem = `${p.record}: ${res?.error ?? 'not found'}`;
       else if (res.entity !== 'influencers') problem = `${p.record} is not a creator`;
       else if (!res.in_export) problem = `${p.record} was not part of this package — confirm the creator`;
+      else {
+        const clash = identityClash(res.row!, idents);
+        if (clash) problem = `${clash} — confirm the creator`;
+        else if (matches.length && !matches.some((m) => m.id === res.id)) problem = `This profile's handle or link belongs to ${matches.map((m) => m.name).join(', ')}, not ${res.label} — confirm the creator`;
+      }
     }
-    const handles = [p.handle, ...(p.platforms ?? []).map((x: Row) => x.username)].map(handleOf).filter(Boolean) as string[];
-    const urls = [p.link, ...(p.platforms ?? []).map((x: Row) => x.profile_url)].filter((u) => webUrl(u)).map((u: string) => normUrl(u));
-    const possible = p.record ? [] : creatorsMatching(db, handles, urls).map((m) => ({ ref: `influencers:${m.id}`, label: m.name, link: `/${linkFor('influencers', m.id)}` }));
+    const keys = [...(p.record ? [String(p.record)] : []), ...(handleOf(p.handle) ? [`@${handleOf(p.handle)}`] : []), ...idents.flatMap((w) => [w.handle ? `${w.platform}:${w.handle}` : '', w.url ?? '']).filter(Boolean)];
+    const dup = taken.findIndex((k) => k.some((x) => keys.includes(x)));
+    taken.push(keys);
+    if (dup >= 0) problem ??= `Same creator as profile #${dup + 1} — apply only one of them, or choose the creator`;
+    const possible = !res || problem ? matches.filter((m) => m.id !== res?.id).map((m) => ({ ref: `influencers:${m.id}`, label: m.name, link: `/${linkFor('influencers', m.id)}` })) : [];
     const row = res && !problem ? decode('influencers', res.row) : null;
+    const retrieved = isoTs(p.retrieved_at);
+    if (p.retrieved_at && !retrieved) issues.push(`retrieved_at "${String(p.retrieved_at).slice(0, 40)}" is not a real date and time`);
     const fields = PROFILE_FIELDS.flatMap(([key, field, label]) => {
       const raw = p[key];
       if (raw === null || raw === undefined || (Array.isArray(raw) && !raw.length) || raw === '') return [];
@@ -870,24 +961,34 @@ function buildPreview(db: Db, user: User, exp: Row, result: Row) {
       return [{ key, field, label, current: row ? row[field] ?? null : null, proposed, ok: !error, error, changed: !sameVal(row?.[field] ?? null, proposed), inferred: (p.inferred_fields ?? []).includes(key) }];
     });
     const platforms = (p.platforms ?? []).map((x: Row) => {
-      const cur = ((row?.platforms ?? []) as Row[]).find((c) => c.platform === x.platform);
-      return { platform: x.platform, username: handleOf(x.username), url: webUrl(x.profile_url), followers: x.followers ?? null, current_followers: cur?.followers ?? null, current_url: cur?.url ?? null, current_source: cur?.source ?? null, is_new: !cur };
+      const url = platformUrl(x.platform, x.profile_url);
+      if (x.profile_url && !url) issues.push(`${x.platform} link "${String(x.profile_url).slice(0, 80)}" is not on ${x.platform}'s site — not saved`);
+      const cur = storedChannel(row?.platforms ?? [], { platform: x.platform, handle: handleOf(x.username), url: url && normUrl(url) });
+      return { platform: x.platform, username: handleOf(x.username), url, host: url ? new URL(url).hostname : null, followers: x.followers ?? null, current_followers: cur?.followers ?? null, current_url: cur?.url ?? null, current_source: cur?.source ?? null, is_new: !cur };
     });
+    // Saved posts, so the review can show the roster's average views after applying (merged with the imported ones).
+    const saved = row ? all(db, 'SELECT id, platform, permalink, external_id, published_at, promotion, metrics FROM posts WHERE influencer_id = ? AND archived_at IS NULL', row.id) : [];
+    const seenPosts = new Set<string>();
     const content = (p.recent_content ?? []).map((c: Row, j: number) => {
-      const url = webUrl(c.url);
-      const ex = row && url ? get(db, `SELECT id, metrics FROM posts WHERE influencer_id = ? AND platform = ? AND (permalink = ? OR external_id = ?) AND archived_at IS NULL`, row.id, c.platform, url, url) : null;
-      const exViews = ex ? JSON.parse(ex.metrics ?? '{}').views ?? null : null;
-      return { j, ...c, url, usable: !!url && !!c.published_at, exists: !!ex, existing_views: exViews, conflict: !!ex && c.views !== null && exViews !== null && c.views !== exViews };
+      const url = platformUrl(c.platform, c.url);
+      const key = url && postKey(url);
+      const published = isoTs(c.published_at);
+      const twice = !!key && seenPosts.has(key);
+      if (key) seenPosts.add(key);
+      const ex = key ? saved.find((x) => x.platform === c.platform && (postKey(x.permalink) === key || postKey(x.external_id) === key)) : null;
+      const exMetrics = ex ? JSON.parse(ex.metrics ?? '{}') : {};
+      return {
+        j, ...c, url: url && postUrl(url), published_at: published, usable: !!url && !!published && !twice,
+        skipped: !url ? `link ${c.url ? `"${String(c.url).slice(0, 60)}" is not on ${c.platform}'s site` : 'missing'}` : !published ? 'date is not valid' : twice ? 'listed twice' : null,
+        exists: !!ex, existing_id: ex?.id ?? null, existing_views: exMetrics.views ?? null, conflict: !!ex && PROFILE_METRICS.some((k) => c[k] != null && exMetrics[k] !== c[k]),
+      };
     });
-    // What the roster will show once the posts are saved (latest 10 not marked paid, at least 3).
-    const avgAfter = Object.fromEntries([...new Set<string>(content.map((c: Row) => c.platform))].map((pl) => {
-      const v = content.filter((c: Row) => c.platform === pl && c.usable && c.promotion !== 'paid' && typeof c.views === 'number').sort((a: Row, b: Row) => String(b.published_at).localeCompare(String(a.published_at))).slice(0, 10).map((c: Row) => c.views as number);
-      return [pl, v.length >= 3 ? { avg: Math.round(v.reduce((a: number, b: number) => a + b, 0) / v.length), posts: v.length } : null];
-    }));
     return {
-      index, record: p.record, link: p.link, status: p.status, source: p.source, retrieved_at: p.retrieved_at, bio: p.bio ?? null,
-      resolved: res && !problem ? { ref: res.ref, label: res.label, link: res.link } : null, problem, possible_matches: possible, stale: !!res?.stale,
-      fields, platforms, content, avg_after: avgAfter, issues: p.issues ?? [], usable: ['retrieved', 'partial'].includes(p.status), permitted: can(user.role, 'talent'),
+      index, record: p.record, link: p.link, status: p.status, source: p.source, retrieved_at: retrieved, bio: p.bio ?? null, idents,
+      resolved: res && !problem ? { ref: res.ref, label: res.label, link: res.link } : null, problem, possible_matches: possible, stale: !!res?.stale && !problem,
+      fields, platforms, content, issues, usable: ['retrieved', 'partial'].includes(p.status), permitted: can(user.role, 'talent'),
+      saved_platforms: ((row?.platforms ?? []) as Row[]).map((x) => x.platform),
+      saved_posts: saved.filter((x) => x.published_at && x.promotion !== 'paid').map((x) => ({ id: x.id, platform: x.platform, published_at: x.published_at, views: JSON.parse(x.metrics ?? '{}').views ?? null })),
     };
   });
 
@@ -937,7 +1038,7 @@ export interface Selection {
   metrics?: { index: number; resolve_ref?: string; choices?: Record<string, 'imported' | 'existing'>; posts?: boolean; replace_posts?: boolean }[];
   tasks?: { id: string; owner_id?: number | null; priority?: string; due_date?: string | null; title?: string; related_ref?: string }[];
   changes?: { id: string; resolve_ref?: string; confirm_financial?: boolean; acknowledge_stale?: boolean }[];
-  profiles?: { index: number; resolve_ref?: string; create_new?: boolean; fields?: string[]; platforms?: boolean; posts?: boolean; replace_posts?: boolean; relationship?: string }[];
+  profiles?: { index: number; resolve_ref?: string; create_new?: boolean; acknowledge_stale?: boolean; fields?: string[]; platforms?: boolean; posts?: boolean; replace_posts?: boolean; relationship?: string }[];
 }
 
 export function applyImport(db: Db, user: User, importId: number, sel: Selection) {
@@ -985,7 +1086,7 @@ export function applyImport(db: Db, user: User, importId: number, sel: Selection
           if (p.url && !/^https?:\/\//.test(p.url)) throw new HttpError(400, `Post link "${String(p.url).slice(0, 60)}" must start with http(s)://`);
           // Includes archived posts (e.g. from an undone import) so the unique index is never hit.
           const ex = get(db, `SELECT * FROM posts WHERE influencer_id = ? AND platform = ? AND (external_id = ? OR (permalink IS NOT NULL AND permalink = ?)) ORDER BY archived_at IS NOT NULL LIMIT 1`, target.id, item.platform, p.external_id ?? p.url ?? '', p.url ?? '');
-          const values = { permalink: p.url ?? null, published_at: p.published_at ? new Date(p.published_at).toISOString() : null, format: p.format ?? null, topic: p.topic ?? null, duration_sec: p.duration_sec ?? null, promotion: p.promotion ?? 'unknown', metrics: p.metrics, source: source.slice(0, 200), metrics_as_of: item.retrieved_at ?? new Date().toISOString() };
+          const values = { permalink: p.url ?? null, published_at: isoTs(p.published_at), format: p.format ?? null, topic: p.topic ?? null, duration_sec: p.duration_sec ?? null, promotion: p.promotion ?? 'unknown', metrics: p.metrics, source: source.slice(0, 200), metrics_as_of: item.retrieved_at ?? new Date().toISOString() };
           if (!ex) {
             if (!values.published_at) continue;
             const pid = insert(db, 'posts', { ...values, influencer_id: target.id, platform: item.platform, external_id: p.external_id ?? p.url ?? null, created_by: user.id });
@@ -1036,25 +1137,32 @@ export function applyImport(db: Db, user: User, importId: number, sel: Selection
       if (!can(user.role, 'talent')) throw new HttpError(403, 'Your role cannot change creator profiles');
       const n = `Profile #${s.index + 1}${pr.fields.find((f: Row) => f.key === 'handle') ? ` (${pr.fields.find((f: Row) => f.key === 'handle').proposed})` : ''}`;
       if (!pr.usable) throw new HttpError(400, `${n} could not be retrieved (${pr.status})`);
-      let target = resolveOverride(s.resolve_ref, 'influencers') ?? (pr.resolved && !pr.problem ? resolveRef(db, user, exp, pr.resolved.ref) : null);
-      if (!target && pr.problem) throw new HttpError(400, `${n}: ${pr.problem}. Choose the creator before applying.`);
-      if (!target && pr.possible_matches.length && !s.create_new) throw new HttpError(400, `${n} may already be ${pr.possible_matches.map((m: Row) => m.label).join(' or ')}. Choose that creator, or confirm a new creator.`);
+      let target = resolveOverride(s.resolve_ref, 'influencers') ?? (pr.resolved ? resolveRef(db, user, exp, pr.resolved.ref) : null);
+      if (!target && pr.problem && !s.create_new) throw new HttpError(400, `${n}: ${pr.problem}. Choose the creator, or confirm a new creator.`);
+      if (!target) {
+        // Checked again now: sees creators added since the preview, including by an earlier profile in this apply.
+        const live = creatorsMatching(db, pr.idents);
+        const unseen = live.filter((m) => !pr.possible_matches.some((x: Row) => x.ref === `influencers:${m.id}`));
+        if (unseen.length || (live.length && !s.create_new)) throw new HttpError(400, `${n} may already be ${live.map((m) => m.name).join(' or ')}. Choose that creator${unseen.length ? '' : ', or confirm a new creator'}.`);
+      }
+      if (target?.stale && !s.acknowledge_stale) throw new HttpError(400, `${n}: ${target.label} changed after the export. Review the current values and tick "apply anyway".`);
       const chosen = pr.fields.filter((f: Row) => (s.fields ?? pr.fields.map((x: Row) => x.key)).includes(f.key));
       const bad = chosen.find((f: Row) => !f.ok);
       if (bad) throw new HttpError(400, `${n}: ${bad.label} — ${bad.error}`);
-      const values: Row = Object.fromEntries(chosen.filter((f: Row) => !target || f.changed).map((f: Row) => [f.field, f.proposed]));
+      const current = target ? decode('influencers', target.row)! : null;
+      const values: Row = Object.fromEntries(chosen.filter((f: Row) => !current || !sameVal(current[f.field] ?? null, f.proposed)).map((f: Row) => [f.field, f.proposed]));
       const source = `ChatGPT profile import: ${pr.source} (user-imported${pr.retrieved_at ? `, retrieved ${formatDateTime(pr.retrieved_at)}` : ''})`.slice(0, 200);
       const asOf = pr.retrieved_at ? String(pr.retrieved_at).slice(0, 10) : today(db);
       if (s.platforms !== false) {
-        const current: Row[] = target ? (decode('influencers', target.row)!.platforms ?? []) : [];
-        const merged = current.map((c) => ({ ...c }));
+        const before: Row[] = current?.platforms ?? [];
+        const merged = before.map((c) => ({ ...c }));
         for (const x of pr.platforms as Row[]) {
           if (!x.url && x.followers === null && !x.username) continue;
-          const cur = merged.find((c) => c.platform === x.platform);
+          const cur = storedChannel(merged, { platform: x.platform, handle: x.username, url: x.url && normUrl(x.url) });
           if (cur) Object.assign(cur, { ...(x.username ? { handle: `@${x.username}` } : {}), ...(x.url ? { url: x.url } : {}), ...(x.followers !== null ? { followers: x.followers, source, updated_at: asOf } : {}) });
           else merged.push({ platform: x.platform, handle: x.username ? `@${x.username}` : null, url: x.url, followers: x.followers, source, updated_at: asOf });
         }
-        if (!sameVal(current, merged)) values.platforms = merged;
+        if (!sameVal(before, merged)) values.platforms = merged;
       }
       if (!target) {
         const created = clean(db, ENTITY.influencers, { relationship: s.relationship ?? 'prospect', ...values, name: values.name ?? values.handle ?? pr.fields.find((f: Row) => f.key === 'handle')?.proposed }, user, 'create');
@@ -1062,30 +1170,41 @@ export function applyImport(db: Db, user: User, importId: number, sel: Selection
         const id = insert(db, 'influencers', { ...created, created_by: user.id });
         afterWrite(db, user, 'influencers', decode('influencers', get(db, 'SELECT * FROM influencers WHERE id = ?', id))!, null);
         audit(db, user.id, 'create', 'influencers', id, null, created, label);
-        applied.push({ kind: 'create', entity: 'influencers', id, label: created.name, ref: `influencers:${id}` });
-        target = { ref: `influencers:${id}`, entity: 'influencers', id, row: get(db, 'SELECT * FROM influencers WHERE id = ?', id)!, label: created.name, link: null, error: null, in_export: false, stale: false, exported_version: null, current_version: null };
+        const row = get(db, 'SELECT * FROM influencers WHERE id = ?', id)!;
+        applied.push({ kind: 'create', entity: 'influencers', id, label: created.name, ref: `influencers:${id}`, version: row.updated_at ?? '' });
+        target = { ref: `influencers:${id}`, entity: 'influencers', id, row, label: created.name, link: null, error: null, in_export: false, stale: false, exported_version: null, current_version: null };
       } else if (Object.keys(values).length) {
-        const existing = decode('influencers', target.row)!;
-        const before = Object.fromEntries(Object.keys(values).map((k) => [k, existing[k] ?? null]));
-        beforeWrite(db, user, 'influencers', values, existing);
+        const before = Object.fromEntries(Object.keys(values).map((k) => [k, current![k] ?? null]));
+        beforeWrite(db, user, 'influencers', values, current);
         update(db, 'influencers', target.id, values);
         const afterRow = decode('influencers', get(db, 'SELECT * FROM influencers WHERE id = ?', target.id))!;
-        afterWrite(db, user, 'influencers', afterRow, existing);
+        afterWrite(db, user, 'influencers', afterRow, current);
         audit(db, user.id, 'update', 'influencers', target.id, before, values, label);
         applied.push({ kind: 'update', entity: 'influencers', id: target.id, label: target.label, ref: target.ref, before, after: Object.fromEntries(Object.keys(values).map((k) => [k, afterRow[k] ?? null])) });
       }
-      if (s.posts !== false) {
+      // New posts unless unticked; saved ones are updated only when asked, merging in the numbers ChatGPT could see.
+      if (s.posts !== false || s.replace_posts) {
+        const saved = all(db, 'SELECT * FROM posts WHERE influencer_id = ? ORDER BY archived_at IS NOT NULL', target.id);
         for (const c of pr.content as Row[]) {
           if (!c.usable) continue;
-          const metrics = { views: c.views ?? null, likes: c.likes ?? null, comments: c.comments ?? null };
-          const ex = get(db, `SELECT * FROM posts WHERE influencer_id = ? AND platform = ? AND (permalink = ? OR external_id = ?) ORDER BY archived_at IS NOT NULL LIMIT 1`, target.id, c.platform, c.url, c.url);
+          const key = postKey(c.url);
+          const ex = saved.find((x) => x.platform === c.platform && (postKey(x.permalink) === key || postKey(x.external_id) === key));
+          const seen = Object.fromEntries(PROFILE_METRICS.filter((k) => c[k] != null).map((k) => [k, c[k]]));
           const meta = { source, metrics_as_of: pr.retrieved_at ?? new Date().toISOString() };
           if (!ex) {
-            const pid = insert(db, 'posts', { influencer_id: target.id, platform: c.platform, external_id: c.url, permalink: c.url, published_at: new Date(c.published_at).toISOString(), format: c.format ?? null, topic: c.topic ?? null, duration_sec: c.duration_sec ?? null, promotion: c.promotion ?? 'unknown', metrics, ...meta, created_by: user.id });
-            applied.push({ kind: 'post', id: pid, created: true });
-          } else if (ex.archived_at || (s.replace_posts && c.conflict)) {
-            update(db, 'posts', ex.id, { metrics, ...meta, archived_at: null });
+            if (s.posts === false) continue;
+            const pid = insert(db, 'posts', { influencer_id: target.id, platform: c.platform, external_id: c.url, permalink: c.url, published_at: c.published_at, format: c.format ?? null, topic: c.topic ?? null, duration_sec: c.duration_sec ?? null, promotion: c.promotion ?? 'unknown', metrics: { views: null, likes: null, comments: null, ...seen }, ...meta, created_by: user.id });
+            saved.push({ id: pid, platform: c.platform, permalink: c.url, external_id: c.url });
+            applied.push({ kind: 'post', id: pid, created: true, version: '' });
+            continue;
+          }
+          const old = JSON.parse(ex.metrics ?? '{}');
+          const differs = Object.entries(seen).some(([k, x]) => old[k] !== x);
+          if ((ex.archived_at && s.posts !== false) || (s.replace_posts && differs && !ex.archived_at)) {
+            const metrics = { ...old, ...seen };
             applied.push({ kind: 'post', id: ex.id, created: false, before: { metrics: ex.metrics, source: ex.source, metrics_as_of: ex.metrics_as_of, archived_at: ex.archived_at }, after: { metrics: JSON.stringify(metrics) } });
+            update(db, 'posts', ex.id, { metrics, ...meta, archived_at: null });
+            Object.assign(ex, { metrics: JSON.stringify(metrics), archived_at: null });
           }
         }
       }
@@ -1139,6 +1258,12 @@ export function applyImport(db: Db, user: User, importId: number, sel: Selection
   });
 }
 
+/** Another live record that points at this one (a creator's campaign, deal or login…). */
+function usedBy(db: Db, entity: string, id: number): string | null {
+  const e = ENTITIES.find((x) => x.fields.some((f) => f.type === 'ref' && f.ref === entity && get(db, `SELECT 1 FROM ${x.key} WHERE ${f.key} = ? AND archived_at IS NULL LIMIT 1`, id)));
+  return e ? `used in ${e.plural.toLowerCase()}` : null;
+}
+
 export function undoImport(db: Db, user: User, importId: number, reason: string) {
   if (!reason?.trim()) throw new HttpError(400, 'Say why you are undoing this import');
   const imp = decode('ai_imports', get(db, 'SELECT * FROM ai_imports WHERE id = ?', importId));
@@ -1149,7 +1274,12 @@ export function undoImport(db: Db, user: User, importId: number, reason: string)
   return tx(db, () => {
     for (const a of [...(imp.applied as Row[])].reverse()) {
       const archive = (table: string) => {
-        run(db, `UPDATE ${table} SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL`, now, now, a.id);
+        const row = get(db, `SELECT * FROM ${table} WHERE id = ?`, a.id);
+        if (!row || row.archived_at) return;
+        // Kept when edited or put to use after the import (a creator signed or added to a campaign, a post tied to a campaign…).
+        const why = a.version !== undefined && (row.updated_at ?? '') !== a.version ? 'edited' : usedBy(db, table, a.id);
+        if (why) return void skipped.push(`${table} #${a.id} was ${why} after the import; left as is`);
+        run(db, `UPDATE ${table} SET archived_at = ?, updated_at = ? WHERE id = ?`, now, now, a.id);
         audit(db, user.id, 'archive', table, a.id, null, null, `Undo ChatGPT import: ${reason}`);
       };
       if (a.kind === 'snapshot' || a.kind === 'post') {

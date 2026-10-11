@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { get, insert, openDb, type Row, type User } from '../src/server/db.ts';
+import { get, insert, openDb, update, type Row, type User } from '../src/server/db.ts';
 import { hashPassword } from '../src/server/app.ts';
 import { seedDemo } from '../src/server/seed.ts';
 import { applyImport, buildPrompt, canUse, createExport, parseProfileLink, previewImport, SCHEMA_VERSION, undoImport } from '../src/server/chatgpt.ts';
@@ -60,7 +60,8 @@ test('new creator from a link: profile, both channels and recent videos saved; r
   assert.equal(pr.resolved, null);
   assert.equal(pr.possible_matches.length, 0);
   assert.equal(pr.fields.find((f: Row) => f.key === 'categories').inferred, true);
-  assert.deepEqual(pr.avg_after.instagram, { avg: 55000, posts: 4 }, 'paid post left out');
+  assert.deepEqual(pr.saved_posts, []);
+  assert.equal(pr.content.filter((c: Row) => c.usable).length, 9);
   const out = applyImport(db, founder, pv.import_id, { profiles: [{ index: 0 }] });
   const created = out.applied.find((a: Row) => a.kind === 'create')!;
   const inf = get(db, 'SELECT * FROM influencers WHERE id = ?', created.id)!;
@@ -115,4 +116,93 @@ test('existing creator: never merged by guesswork; refresh updates channels with
   const k3 = createExport(db, founder, { type: 'creator_profile', links: ['https://www.instagram.com/privateacct/'] });
   const failed = previewImport(db, founder, JSON.stringify(result(k3, [profile({ link: 'https://www.instagram.com/privateacct/', handle: '@privateacct', status: 'failed', platforms: [], recent_content: [], issues: ['Login required'] })])));
   assert.throws(() => applyImport(db, founder, failed.import_id, { profiles: [{ index: 0 }] }), /could not be retrieved/);
+});
+
+test('links: the same profile pasted twice is one link; matched only on the same platform; package leaves private notes out', () => {
+  const key = createExport(db, founder, { type: 'creator_profile', links: ['https://www.instagram.com/NewChef/?hl=en', 'https://instagram.com/newchef', 'https://m.instagram.com/newchef/#top'] });
+  assert.equal(pkgOf(key).links.length, 1);
+  // A YouTube-only creator using @kidchef is not the Instagram account @kidchef.
+  const yt = insert(db, 'influencers', { name: 'Aarav Cooks', handle: '@aaravcooks', relationship: 'prospect', platforms: [{ platform: 'youtube', handle: '@kidchef', url: 'https://youtube.com/channel/UCabc123', followers: 1000 }] });
+  const links = pkgOf(createExport(db, founder, { type: 'creator_profile', links: ['https://www.instagram.com/kidchef/', 'https://www.youtube.com/channel/UCabc123'] })).links;
+  assert.equal(links[0].matched, null, 'an Instagram link is never matched to a YouTube channel');
+  assert.equal(links[1].matched, `influencers:${yt}`, 'same channel link matched despite www.');
+  const riya = get(db, `SELECT id FROM influencers WHERE handle = '@riyaglows'`)!.id;
+  const rec = pkgOf(createExport(db, founder, { type: 'creator_profile', ids: [riya] })).records.influencers[0];
+  for (const k of ['conflicts', 'exclusivity_restrictions', 'audience', 'availability_notes', 'unsuitable_categories', 'relationship']) assert.ok(!(k in rec), `${k} left out`);
+  assert.equal(rec.platforms[0].username, 'riyaglows');
+});
+
+test('one new creator returned twice in a result is created once', () => {
+  const key = createExport(db, founder, { type: 'creator_profile', links: ['https://www.instagram.com/twinfoodie/', 'https://www.youtube.com/@twinfoodie'] });
+  const base = { name: 'Twin Foodie', handle: '@twinfoodie', recent_content: [] };
+  const pv = previewImport(db, founder, JSON.stringify(result(key, [
+    profile({ ...base, link: 'https://www.instagram.com/twinfoodie/', platforms: [{ platform: 'instagram', username: 'twinfoodie', profile_url: 'https://www.instagram.com/twinfoodie/', followers: 5000, posts_count: null }] }),
+    profile({ ...base, link: 'https://www.youtube.com/@twinfoodie', platforms: [{ platform: 'youtube', username: 'twinfoodie', profile_url: 'https://www.youtube.com/@twinfoodie', followers: 900, posts_count: null }] }),
+  ])));
+  assert.match(pv.profiles[1].problem, /Same creator as profile #1/);
+  assert.throws(() => applyImport(db, founder, pv.import_id, { profiles: [{ index: 0 }, { index: 1, create_new: true }] }), /may already be Twin Foodie/);
+  applyImport(db, founder, pv.import_id, { profiles: [{ index: 0 }] });
+  assert.equal(get(db, `SELECT COUNT(*) n FROM influencers WHERE handle = '@twinfoodie' AND archived_at IS NULL`)!.n, 1);
+});
+
+test('a record reference whose channels disagree is never trusted', () => {
+  const riya = get(db, `SELECT * FROM influencers WHERE handle = '@riyaglows'`)!;
+  const key = createExport(db, founder, { type: 'creator_profile', ids: [riya.id], links: ['https://www.instagram.com/mixupfoodie/'] });
+  const pv = previewImport(db, founder, JSON.stringify(result(key, [profile({
+    record: `influencers:${riya.id}`, link: 'https://www.instagram.com/mixupfoodie/', name: 'Mixup Foodie', handle: '@mixupfoodie', recent_content: [],
+    platforms: [{ platform: 'instagram', username: 'mixupfoodie', profile_url: 'https://www.instagram.com/mixupfoodie/', followers: 1000, posts_count: null }],
+  })])));
+  const pr = pv.profiles[0];
+  assert.equal(pr.resolved, null);
+  assert.match(pr.problem, /Riya Sharma's instagram is @riyaglows/);
+  assert.throws(() => applyImport(db, founder, pv.import_id, { profiles: [{ index: 0 }] }), /confirm a new creator/);
+  const out = applyImport(db, founder, pv.import_id, { profiles: [{ index: 0, create_new: true }] });
+  assert.equal(get(db, 'SELECT name FROM influencers WHERE id = ?', riya.id)!.name, 'Riya Sharma', 'existing creator untouched');
+  assert.ok(out.applied.some((a: Row) => a.kind === 'create'));
+});
+
+test('channels and posts: off-site links dropped, bad dates skipped, share links de-duplicated, metrics merged, second channel kept', () => {
+  const kabir = get(db, `SELECT * FROM influencers WHERE handle = '@kabircooks'`)!;
+  const pid = insert(db, 'posts', { influencer_id: kabir.id, platform: 'instagram', external_id: '1789', permalink: 'https://www.instagram.com/reel/KbX1/', published_at: '2026-10-01T10:00:00.000Z', promotion: 'unknown', metrics: { views: 1000, reach: 900, likes: 50, comments: 5, shares: 3, saves: 2 } });
+  const key = createExport(db, founder, { type: 'creator_profile', ids: [kabir.id] });
+  const item = (url: string, published_at: string, views: number) => ({ platform: 'instagram', url, published_at, format: 'reel', topic: null, duration_sec: null, promotion: 'unknown', views, likes: null, comments: null });
+  const pv = previewImport(db, founder, JSON.stringify(result(key, [profile({
+    record: `influencers:${kabir.id}`, link: 'https://www.instagram.com/kabircooks/', name: 'Kabir Mehta', handle: '@kabircooks', city: 'Delhi', inferred_fields: [],
+    platforms: [
+      { platform: 'instagram', username: 'kabircooks', profile_url: 'https://www.instagram.com/kabircooks/', followers: 215000, posts_count: null },
+      { platform: 'youtube', username: 'kabircookslive', profile_url: 'https://evil.example/@kabircookslive', followers: 4000, posts_count: null },
+    ],
+    recent_content: [item('https://instagram.com/reel/KbX1?igsh=abc', '2026-10-01T10:00:00Z', 5000), item('https://evil.example/reel/x', '2026-10-02T10:00:00Z', 1), item('https://www.instagram.com/reel/KbBad/', '2026-10-32T10:00:00Z', 1), item('https://www.instagram.com/reel/KbNew/', '2026-10-05T10:00:00Z', 7000)],
+  })])));
+  const pr = pv.profiles[0];
+  assert.match(pr.problem, /Kabir Mehta's youtube is @kabircooks/, 'an unknown second channel needs confirming');
+  assert.ok(pr.issues.some((x: string) => /not on youtube's site/.test(x)));
+  assert.deepEqual(pr.content.map((c: Row) => c.usable), [true, false, false, true]);
+  assert.match(pr.content[1].skipped, /not on instagram's site/);
+  assert.equal(pr.content[2].skipped, 'date is not valid');
+  assert.equal(pr.content[0].url, 'https://instagram.com/reel/KbX1', 'tracking parameters dropped');
+  applyImport(db, founder, pv.import_id, { profiles: [{ index: 0, resolve_ref: `influencers:${kabir.id}`, fields: [], posts: false, replace_posts: true }] });
+  assert.deepEqual(JSON.parse(get(db, 'SELECT metrics FROM posts WHERE id = ?', pid)!.metrics), { views: 5000, reach: 900, likes: 50, comments: 5, shares: 3, saves: 2 }, 'views updated, other figures kept');
+  assert.equal(get(db, `SELECT COUNT(*) n FROM posts WHERE influencer_id = ? AND (permalink LIKE '%KbX1%' OR permalink LIKE '%KbNew%')`, kabir.id)!.n, 1, 'no duplicate post; new posts not saved when unticked');
+  const yts = JSON.parse(get(db, 'SELECT platforms FROM influencers WHERE id = ?', kabir.id)!.platforms).filter((p: Row) => p.platform === 'youtube');
+  assert.deepEqual(yts.map((p: Row) => [p.handle, p.followers, p.url ?? null]), [['@kabircooks', 85000, 'https://www.youtube.com/@kabircooks'], ['@kabircookslive', 4000, null]]);
+});
+
+test('a creator changed since the export needs acknowledging; undo keeps a created creator edited afterwards', () => {
+  const arjun = get(db, `SELECT * FROM influencers WHERE handle = '@techwitharjun'`)!;
+  const key = createExport(db, founder, { type: 'creator_profile', ids: [arjun.id], links: ['https://www.instagram.com/keepme/'] });
+  update(db, 'influencers', arjun.id, { city: 'Thiruvananthapuram' });
+  const pv = previewImport(db, founder, JSON.stringify(result(key, [
+    profile({ record: `influencers:${arjun.id}`, link: 'https://www.youtube.com/@techwitharjun', name: 'Arjun Nair', handle: '@techwitharjun', city: 'Kochi', recent_content: [], platforms: [{ platform: 'youtube', username: 'techwitharjun', profile_url: 'https://www.youtube.com/@techwitharjun', followers: 350000, posts_count: null }] }),
+    profile({ link: 'https://www.instagram.com/keepme/', name: 'Keep Me', handle: '@keepme', recent_content: [], platforms: [{ platform: 'instagram', username: 'keepme', profile_url: 'https://www.instagram.com/keepme/', followers: 100, posts_count: null }] }),
+  ])));
+  assert.equal(pv.profiles[0].stale, true);
+  assert.throws(() => applyImport(db, founder, pv.import_id, { profiles: [{ index: 0 }] }), /changed after the export/);
+  const out = applyImport(db, founder, pv.import_id, { profiles: [{ index: 0, acknowledge_stale: true, fields: [] }, { index: 1 }] });
+  assert.equal(get(db, 'SELECT city FROM influencers WHERE id = ?', arjun.id)!.city, 'Thiruvananthapuram', "the teammate's edit is kept when the field is not ticked");
+  const created = out.applied.find((a: Row) => a.kind === 'create')!.id;
+  update(db, 'influencers', created, { relationship: 'exclusive' });
+  const { skipped } = undoImport(db, founder, pv.import_id, 'test');
+  assert.ok(skipped.some((x: string) => x.includes(`influencers #${created} was edited`)), skipped.join('; '));
+  assert.equal(get(db, 'SELECT archived_at FROM influencers WHERE id = ?', created)!.archived_at, null);
 });

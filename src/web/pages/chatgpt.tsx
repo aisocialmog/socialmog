@@ -176,7 +176,7 @@ function NewAnalysis() {
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api('/api/chatgpt/exports', { body: { type, ids, extra_ids: extra, links: t?.profiles ? linkList : [], from, to, questions: (questions ?? t!.questions.join('\n')).split('\n').map((x: string) => x.trim()).filter(Boolean) } });
+      const r = await api('/api/chatgpt/exports', { body: { type, ids, extra_ids: extra, links: t?.profiles ? linkList : [], ...(t?.profiles ? {} : { from, to }), questions: (questions ?? t!.questions.join('\n')).split('\n').map((x: string) => x.trim()).filter(Boolean) } });
       invalidate('/api/chatgpt');
       nav(`/chatgpt/exports/${r.export_key}`);
     } catch (e) {
@@ -376,7 +376,7 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
     tasks: Object.fromEntries(pv.tasks.map((t: Row) => [t.id, { on: false, owner_id: me.user.id, priority: t.priority, due_date: t.due_date ?? '', related_ref: t.related_error ? '' : undefined }])) as Record<string, Row>,
     changes: Object.fromEntries(pv.changes.map((c: Row) => [c.id, { on: c.applicable && !c.financial && !c.stale && !c.unresolved, resolve_ref: '', confirm_financial: false, acknowledge_stale: false }])) as Record<string, Row>,
     profiles: Object.fromEntries((pv.profiles ?? []).map((p: Row) => [p.index, {
-      on: p.usable && p.permitted && !p.problem && !p.possible_matches.length, resolve_ref: '', create_new: false, relationship: 'prospect', platforms: true, posts: true, replace_posts: false,
+      on: p.usable && p.permitted && !p.problem && !p.possible_matches.length && !p.stale, resolve_ref: '', create_new: false, acknowledge_stale: false, relationship: 'prospect', platforms: true, posts: true, replace_posts: false,
       fields: p.fields.filter((f: Row) => f.ok && (f.changed || !p.resolved)).map((f: Row) => f.key),
     }])) as Record<number, Row>,
   }));
@@ -390,7 +390,7 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
       metrics: on('metrics').map(([i, v]) => ({ index: Number(i), resolve_ref: v.resolve_ref || undefined, choices: v.choices, posts: v.posts, replace_posts: v.replace_posts })),
       tasks: on('tasks').map(([id, v]) => ({ id, owner_id: v.owner_id ? Number(v.owner_id) : null, priority: v.priority, due_date: v.due_date || null, related_ref: v.related_ref })),
       changes: on('changes').map(([id, v]) => ({ id, resolve_ref: v.resolve_ref || undefined, confirm_financial: v.confirm_financial, acknowledge_stale: v.acknowledge_stale })),
-      profiles: on('profiles').map(([i, v]) => ({ index: Number(i), resolve_ref: v.resolve_ref || undefined, create_new: v.create_new, relationship: v.relationship, fields: v.fields, platforms: v.platforms, posts: v.posts, replace_posts: v.replace_posts })),
+      profiles: on('profiles').map(([i, v]) => ({ index: Number(i), resolve_ref: v.resolve_ref || undefined, create_new: v.create_new, acknowledge_stale: v.acknowledge_stale, relationship: v.relationship, fields: v.fields, platforms: v.platforms, posts: v.posts, replace_posts: v.replace_posts })),
     };
     const ok = await confirmAction({ title: `Apply ${count} selected item${count === 1 ? '' : 's'}?`, message: 'Everything is applied together: if any item fails, nothing is changed. Applied changes are audited and can be undone.', confirm: 'Apply' });
     if (ok === false) return;
@@ -579,32 +579,49 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
 
 const compactN = (n: number | null | undefined) => (n == null ? '—' : formatNumberIN(n, { compact: true }));
 
+/** The roster's previous average views after applying, with the same rule as the roster (last 10 posts not marked paid, at least 3). */
+function avgAfter(p: Row, st: Row): string[] {
+  const plats = new Set<string>([...p.saved_platforms, ...(st.platforms ? p.platforms.map((x: Row) => x.platform) : [])]);
+  const update = new Map(st.replace_posts ? p.content.filter((c: Row) => c.usable && c.conflict && c.views != null).map((c: Row) => [c.existing_id, c.views]) : []);
+  const posts = [
+    ...p.saved_posts.map((x: Row) => (update.has(x.id) ? { ...x, views: update.get(x.id) } : x)),
+    ...(st.posts ? p.content.filter((c: Row) => c.usable && !c.exists && c.promotion !== 'paid') : []),
+  ];
+  return [...plats].flatMap((pl) => {
+    const v = posts.filter((x) => x.platform === pl && typeof x.views === 'number').sort((a, b) => String(b.published_at).localeCompare(String(a.published_at))).slice(0, 10).map((x) => x.views as number);
+    return v.length >= 3 ? [`${platformName(pl)} ${compactN(Math.round(v.reduce((a, b) => a + b, 0) / v.length))} (last ${v.length} posts, boosted excluded)`] : [];
+  });
+}
+
 /** One creator profile from ChatGPT: who it is (new / existing / your choice), field diffs, channels and recent videos. */
 function ProfileItem({ p, st, set }: { p: Row; st: Row; set: (patch: Row) => void }) {
   const name = p.fields.find((f: Row) => f.key === 'name')?.proposed ?? p.fields.find((f: Row) => f.key === 'handle')?.proposed ?? p.link;
   const target = p.resolved ? 'existing' : st.resolve_ref ? 'chosen' : 'new';
   const usable = p.content.filter((c: Row) => c.usable);
+  const skipped = p.content.filter((c: Row) => !c.usable);
   const fresh = usable.filter((c: Row) => !c.exists).length;
   const conflicts = usable.filter((c: Row) => c.conflict).length;
-  const needsDecision = target === 'new' && (p.problem || p.possible_matches.length > 0) && !st.create_new;
+  const decide = !p.resolved && (p.problem || p.possible_matches.length > 0);
+  const needsDecision = target === 'new' && decide && !st.create_new;
+  const avg = avgAfter(p, st);
   return (
     <div className="card stack tight">
       <div className="row">
         <label className="check"><input type="checkbox" checked={st.on} disabled={!p.usable || !p.permitted} onChange={(e) => set({ on: e.target.checked })} />{' '}
-          <strong>{target === 'existing' ? <>Update <Link to={p.resolved.link}>{p.resolved.label}</Link></> : target === 'chosen' ? 'Update the creator chosen below' : `Add new creator: ${name}`}</strong></label>
+          <strong>{target === 'existing' ? <>Update <Link to={p.resolved.link}>{p.resolved.label}</Link></> : target === 'chosen' ? 'Update the creator chosen below' : needsDecision ? `Choose the creator: ${name}` : `Add new creator: ${name}`}</strong></label>
         <Badge tone={p.status === 'retrieved' ? 'good' : p.status === 'partial' ? 'warn' : 'bad'}>{humanize(p.status)}</Badge>
         <span className="small muted">{/^https?:\/\//i.test(p.link) ? <a href={p.link} target="_blank" rel="noreferrer">{p.link}</a> : p.link} · {p.source}{p.retrieved_at ? ` · retrieved ${fmtDateTime(p.retrieved_at)}` : ''}</span>
       </div>
       {!p.permitted && <div className="small neg">Your role cannot change creator profiles.</div>}
       {!p.usable && <div className="small neg">ChatGPT could not read this profile ({p.status}). Ask it to work from screenshots, then import the new result.</div>}
-      {p.problem && <label className="field"><span>{p.problem}</span><RefSelect entity="influencers" value={st.resolve_ref} onChange={(ref) => set({ resolve_ref: ref, on: !!ref && p.usable && p.permitted })} /></label>}
-      {!p.resolved && !p.problem && p.possible_matches.length > 0 && (
+      {decide && (
         <div className="alert warn small stack tight">
-          <span>This handle or link is already in the roster: {p.possible_matches.map((m: Row, i: number) => <span key={m.ref}>{i ? ', ' : ''}<Link to={m.link}>{m.label}</Link></span>)}. Choose what to do:</span>
+          <span>{p.problem ? `${p.problem}.` : 'This handle or link is already in the roster.'}{p.possible_matches.length > 0 && <> Matching creators: {p.possible_matches.map((m: Row, i: number) => <span key={m.ref}>{i ? ', ' : ''}<Link to={m.link}>{m.label}</Link></span>)}.</>} Choose what to do:</span>
           <RefSelect entity="influencers" value={st.resolve_ref} placeholder="Update an existing creator…" onChange={(ref) => set({ resolve_ref: ref, create_new: false, on: !!ref && p.usable && p.permitted })} />
           <label className="check"><input type="checkbox" checked={st.create_new} onChange={(e) => set({ create_new: e.target.checked, resolve_ref: '', on: e.target.checked && p.usable && p.permitted })} /> It is a different person — add as a new creator</label>
         </div>
       )}
+      {p.stale && <label className="check small"><input type="checkbox" checked={st.acknowledge_stale} onChange={(e) => set({ acknowledge_stale: e.target.checked, on: e.target.checked && p.usable && p.permitted })} /> This creator changed after the export — I've checked the current values; apply anyway</label>}
       {target === 'new' && !needsDecision && (
         <label className="field" style={{ maxWidth: 260 }}><span>Add to the roster as</span><select className="input" value={st.relationship} onChange={(e) => set({ relationship: e.target.value })}>{['prospect', 'campaign_only', 'non_exclusive', 'exclusive', 'agency_owned'].map((r) => <option key={r} value={r}>{humanize(r)}</option>)}</select></label>
       )}
@@ -627,17 +644,18 @@ function ProfileItem({ p, st, set }: { p: Row; st: Row; set: (patch: Row) => voi
         <div className="table-wrap"><table className="table small">
           <thead><tr><th>Channel</th><th>Link</th><th className="num">Followers now</th><th className="num">From ChatGPT</th></tr></thead>
           <tbody>{p.platforms.map((x: Row, i: number) => (
-            <tr key={i}><td>{platformName(x.platform)}{x.is_new && <> <Badge tone="info">new</Badge></>}</td><td>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">@{x.username ?? x.url}</a> : <span className="muted">—</span>}</td>
+            <tr key={i}><td>{platformName(x.platform)}{x.is_new && <> <Badge tone="info">new</Badge></>}</td><td>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">{x.host}{x.username ? ` · @${x.username}` : ''}</a> : <span className="muted">{x.username ? `@${x.username} · ` : ''}no link</span>}</td>
               <td className="num">{compactN(x.current_followers)}</td><td className="num strong">{compactN(x.followers)}</td></tr>
           ))}</tbody>
         </table></div>
       )}
       <div className="row small">
         <label className="check"><input type="checkbox" checked={st.platforms} onChange={(e) => set({ platforms: e.target.checked })} /> Save channel links and follower counts</label>
-        <label className="check"><input type="checkbox" checked={st.posts} disabled={!fresh && !conflicts} onChange={(e) => set({ posts: e.target.checked })} /> Save {fresh} new post{fresh === 1 ? '' : 's'}/video{fresh === 1 ? '' : 's'}</label>
-        {conflicts > 0 && <label className="check"><input type="checkbox" checked={st.replace_posts} onChange={(e) => set({ replace_posts: e.target.checked })} /> Update views on {conflicts} already saved</label>}
+        <label className="check"><input type="checkbox" checked={st.posts && fresh > 0} disabled={!fresh} onChange={(e) => set({ posts: e.target.checked })} /> Save {fresh} new post{fresh === 1 ? '' : 's'}/video{fresh === 1 ? '' : 's'}</label>
+        {conflicts > 0 && <label className="check"><input type="checkbox" checked={st.replace_posts} onChange={(e) => set({ replace_posts: e.target.checked })} /> Update views, likes and comments on {conflicts} already saved</label>}
       </div>
-      {Object.entries(p.avg_after).some(([, a]) => a) && <div className="small">Prev. avg views after saving: {Object.entries(p.avg_after).filter(([, a]) => a).map(([pl, a]: [string, any]) => `${platformName(pl)} ${compactN(a.avg)} (last ${a.posts} posts, boosted excluded)`).join(' · ')}</div>}
+      {avg.length > 0 && <div className="small">Prev. avg views after saving: {avg.join(' · ')}</div>}
+      {skipped.length > 0 && <div className="small muted">Not saved: {skipped.map((c: Row) => `${platformName(c.platform)} ${c.topic ?? c.format ?? 'post'} (${c.skipped})`).join('; ')}</div>}
       {usable.length > 0 && (
         <details className="small"><summary>{usable.length} recent posts/videos</summary>
           <table className="table small"><tbody>{usable.map((c: Row) => (
