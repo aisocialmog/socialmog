@@ -49,7 +49,7 @@ export function Influencers() {
   return (
     <div className="stack">
       <PageHead title="Influencer roster" sub="Creators we manage, work with or are scouting · hover a figure to see its source and date"
-        actions={<><AnalyseButton type="influencer_growth" /><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn" onClick={() => setKit(true)}><BookImage /> Media kit</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
+        actions={<><AnalyseButton type="creator_profile" cap="talent" label="Add creators from links" /><AnalyseButton type="influencer_growth" /><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn" onClick={() => setKit(true)}><BookImage /> Media kit</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
       <EntityTable entity="influencers" overrides={{
         name: { render: (r) => <span className="row nowrap-row"><Avatar r={r} /><span><strong>{r.name}</strong> <DemoTag row={r} /><div className="small muted">{r.handle}</div></span></span> },
         platforms: { hidden: true, label: 'All platforms', render: (r) => <PlatformLinks platforms={r.platforms} />, value: (r) => Math.max(0, ...(r.platforms ?? []).map((p: Row) => p.followers ?? 0)) },
@@ -294,6 +294,7 @@ export function InfluencerPage() {
               <div className="row">
                 <Link className="btn" to={`/analytics/influencer/${r.id}`}>Weekly analysis</Link>
                 <AnalyseButton type="influencer_growth" ids={[r.id]} />
+                <AnalyseButton type="creator_profile" ids={[r.id]} cap="talent" label="Fill profile with ChatGPT" />
                 <button className="btn" onClick={() => setKit(true)}><BookImage /> Media kit</button>
                 {canEdit && <PhotoButton r={r} onDone={q.reload} />}
                 {canEdit && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}

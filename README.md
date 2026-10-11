@@ -4,6 +4,20 @@ Internal operating system for Socialmog: influencer roster, brand CRM and deal p
 
 Every dashboard figure is derived from stored records and opens the records behind it. Money is stored as integer paise; INR, Indian digit grouping (₹1,00,000) and Asia/Kolkata are the defaults.
 
+## Getting started — what you need to do
+
+**1. Put it online (once).** A small server or VPS with Node.js 22.18+, a domain and HTTPS (for example Caddy or Nginx in front). Run `npm install && npm run build`, then start it with `NODE_ENV=production npm start` under a process manager (pm2 or systemd) and these settings in `.env`: `FOUNDER_EMAIL`, `FOUNDER_PASSWORD`, a long random `APP_SECRET`, `APP_BASE_URL`, `DATA_DIR`, and `SEED_DEMO=0` for real use. Copy `DATA_DIR/backups` off the server regularly (the app keeps 14 daily backups locally).
+
+**2. First login (founder).** Look around the demo data if it is loaded, then remove it (**Settings → Data & backups**). Set **Finance rules**, **Automation** (weekly day/time) and **Agency & media kit** (contact details for kits). Add your team under **Users & roles** with the right role each.
+
+**3. Finance — the part to get right.** Add every bank/UPI/cash account with its opening balance and date (**Finance → Accounts**). Add what brands owe you (**Receivables**, with expected dates) and what you owe (**Payables**: creators, editors, rent, salaries, subscriptions as recurring). From then on, record each real money movement when it happens (or import the bank CSV) and apply it to the invoice or payable, including TDS and whose it is.
+
+**4. Creators, brands and work.** Add creators with **Influencers → Add creators from links** (ChatGPT fills the profile, both channels and recent videos) or by hand; upload photos and fill rate cards (brand price) and commissions. Add brands and deals; convert won deals into campaigns; add deliverables, content tasks and editors.
+
+**5. Routine.** Daily: clear **Needs my attention** on the dashboard and record money in/out. Weekly: run the prepared ChatGPT package (copy prompt → ChatGPT → import → apply) and generate reports. Before pitching: generate a media kit. Quarterly: check TDS credits in 26AS/AIS (**Finance → TDS**).
+
+**Optional:** Instagram API connection (Meta app keys) and an OpenAI key — everything works without them.
+
 ## Run it
 
 Requires Node.js **22.18+** (Node runs the TypeScript directly; no build step for the server).
@@ -36,7 +50,7 @@ npm test        # node:test — finance engine, permissions over HTTP, forecast 
 npm run typecheck
 ```
 
-Covered (40 tests): Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction, and the ChatGPT workflow (package contents and exclusions, schema errors, unresolved IDs, metric conflicts, provenance, financial guards, stale exports, duplicate results, all-or-nothing apply, undo, permissions, weekly preparation, labelled PDF commentary), roster figures (average-views basis and fallbacks, paid posts excluded, brand prices), media kits (whole vs category grouping, brand-safe content) and photo uploads (byte checks, EXIF/GPS stripping, damaged files, permissions), unsafe links and long profiles spanning pages, and the TDS register (ownership splits, on-hold pass-on payables, creator-PAN TDS, reversals, reminders, backfill).
+Covered (43 tests): Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction, and the ChatGPT workflow (package contents and exclusions, schema errors, unresolved IDs, metric conflicts, provenance, financial guards, stale exports, duplicate results, all-or-nothing apply, undo, permissions, weekly preparation, labelled PDF commentary), roster figures (average-views basis and fallbacks, paid posts excluded, brand prices), media kits (whole vs category grouping, brand-safe content) and photo uploads (byte checks, EXIF/GPS stripping, damaged files, permissions), unsafe links and long profiles spanning pages, and the TDS register (ownership splits, on-hold pass-on payables, creator-PAN TDS, reversals, reminders, backfill), and creator profiles from links (link parsing, exact matching only, new vs existing creators, unsafe links, failed reads, undo).
 
 ## How the money works
 
@@ -73,6 +87,7 @@ The roster shows each creator's photo, categories, Instagram and YouTube links w
 - **Previous average views** = mean of the latest 10 posts recorded for that channel, excluding posts marked as boosted, once at least 3 exist; otherwise the profile figure with its source and date. Engagement uses the same posts' reach, and only posts with likes, comments, shares and saves all recorded. Followers come from the newest weekly snapshot if it is more recent than the profile entry. Nothing is estimated: missing figures show as unavailable.
 - **Commercials** use each rate-card line's *brand price* (or the rate card if none is set). Negotiated rates and commissions stay internal.
 - **Photos**: upload on the creator page (talent managers and founders). The browser crops it square and shrinks it to 400px; the server checks the image, strips location/device (EXIF) data and refuses damaged files, so kits stay small and safe to send.
+- **Add creators from links** (roster) / **Fill profile with ChatGPT** (creator page): paste Instagram/YouTube profile links; the Manual ChatGPT workflow returns name, handle, city, languages, categories, a public business email, every channel with followers, and the last 12 posts/videos with views. ChatGPT reads the public page, a connector you authorised in ChatGPT, or screenshots you upload when Instagram blocks it — and marks anything it could not read. You review field by field before saving: new creators are added; existing ones are matched only by exact handle or link (otherwise you choose); videos are saved so previous average views fill in; everything is undoable.
 - **Media kit** (roster page or creator page): the whole roster grouped by category, one category, a separate kit for every category, or a single creator. Each kit has an at-a-glance table and a profile per creator (photo, links, followers, previous average views, median views, engagement, audience, commercials, brands worked with, top content), with the source of every figure. Kits never include commissions, negotiated rates, identity or contact details, conflicts or internal notes. Agency contact details and the note printed on kits are set in **Settings → Agency & media kit**.
 
 ## Manual ChatGPT analysis

@@ -38,7 +38,8 @@ export function refLink(ref: string | null | undefined): string | null {
   if (entity === 'analytics_snapshots' || entity === 'posts') return null;
   return REF_PATHS[entity] ? `${REF_PATHS[entity]}/${id}` : `/r/${entity}/${id}`;
 }
-const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+const show = (v: unknown) => (v === null || v === undefined || v === '' ? '—' : Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.join(', ') : typeof v === 'object' ? JSON.stringify(v) : String(v));
+const platformName = (p: string) => (p === 'youtube' ? 'YouTube' : humanize(p));
 
 /** The report (and its parameters) that turns a package into a PDF. */
 function reportLink(e: Row, analysisId?: number | null): string | null {
@@ -166,14 +167,16 @@ function NewAnalysis() {
   const [period, setPeriod] = useState(sp.get('period') ?? 'last_week');
   const [custom, setCustom] = useState<[string, string]>([addDays(today, -6), today]);
   const [questions, setQuestions] = useState<string | null>(null);
+  const [links, setLinks] = useState('');
   const [busy, setBusy] = useState(false);
   const t = types.data?.types.find((x) => x.key === type);
+  const linkList = links.split(/\s+/).map((x) => x.trim()).filter(Boolean);
   const p = periods(today);
   const [from, to] = period === 'custom' ? custom : [p[period][1], p[period][2]];
   const create = async () => {
     setBusy(true);
     try {
-      const r = await api('/api/chatgpt/exports', { body: { type, ids, extra_ids: extra, from, to, questions: (questions ?? t!.questions.join('\n')).split('\n').map((x: string) => x.trim()).filter(Boolean) } });
+      const r = await api('/api/chatgpt/exports', { body: { type, ids, extra_ids: extra, links: t?.profiles ? linkList : [], from, to, questions: (questions ?? t!.questions.join('\n')).split('\n').map((x: string) => x.trim()).filter(Boolean) } });
       invalidate('/api/chatgpt');
       nav(`/chatgpt/exports/${r.export_key}`);
     } catch (e) {
@@ -196,15 +199,21 @@ function NewAnalysis() {
                 {t && !t.allowed && <span className="error">Your role cannot run this analysis.</span>}
                 {t?.connector && <span className="hint">Supports Instagram metrics from a connector you have authorised inside ChatGPT.</span>}
               </label>
-              <label className="field"><span>Reporting period</span>
+              {!t?.profiles && <label className="field"><span>Reporting period</span>
                 <select className="input" value={period} onChange={(e) => setPeriod(e.target.value)}>{Object.entries(p).map(([k, [l]]) => <option key={k} value={k}>{l}</option>)}<option value="custom">Custom…</option></select>
                 <span className="hint">{formatPeriod(from, to)}</span>
-              </label>
-              {period === 'custom' && <>
+              </label>}
+              {!t?.profiles && period === 'custom' && <>
                 <label className="field"><span>From</span><input type="date" className="input" value={custom[0]} onChange={(e) => setCustom([e.target.value, custom[1]])} /></label>
                 <label className="field"><span>To</span><input type="date" className="input" value={custom[1]} onChange={(e) => setCustom([custom[0], e.target.value])} /></label>
               </>}
             </div>
+            {t?.profiles && (
+              <label className="field"><span>Instagram / YouTube profile links (one per line)</span>
+                <textarea className="input mono" rows={5} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={'https://www.instagram.com/creatorhandle/\nhttps://www.youtube.com/@creatorhandle'} />
+                <span className="hint">ChatGPT reads each public profile (or your analytics connector, or screenshots you upload when Instagram blocks it) and returns the creator's details, both channels and their recent videos with views. New creators are added; existing ones are matched only by exact handle or link, and you review everything before it is saved.</span>
+              </label>
+            )}
             {t?.pick && <div className="field"><span>{t.pick.label}</span><PickList entity={t.pick.entity} value={ids} onChange={setIds} single={t.pick.single} /></div>}
             {t?.extra && <div className="field"><span>{t.extra.label}</span><PickList entity={t.extra.entity} value={extra} onChange={setExtra} /></div>}
             {t && (
@@ -213,7 +222,7 @@ function NewAnalysis() {
               </label>
             )}
             <div className="alert info small">The package includes record IDs, handles and profile links, the period and timezone, money in INR, metric definitions, relevant budgets, deliverables, targets and previous results, data sources and timestamps, missing-data notes, record versions and the required JSON response format. Passwords, tokens, bank and identity details and internal notes are never included.</div>
-            <div className="row"><span className="grow" /><button className="btn primary" disabled={busy || !t?.allowed || (t.pick?.required && !ids.length)} onClick={create}><Sparkles /> Create package & prompt</button></div>
+            <div className="row"><span className="grow" /><button className="btn primary" disabled={busy || !t?.allowed || (t.pick?.required && !ids.length) || (t.profiles && !ids.length && !linkList.length)} onClick={create}><Sparkles /> Create package & prompt</button></div>
           </div>
         </Card>
       )}</Async>
@@ -236,18 +245,19 @@ function ExportPage() {
       const pdf = reportLink(e, null);
       return (
         <div className="stack">
-          <PageHead title={e.label} sub={<>{LABEL} · package <code>{e.export_key}</code> · {formatPeriod(e.period.start, e.period.end)} ({e.period.timezone}) · created {fmtDateTime(e.created_at)}</>} actions={<><StatusBadge s={e.status} /><Link className="btn" to="/chatgpt">All packages</Link></>} />
+          <PageHead title={e.label} sub={<>{LABEL} · package <code>{e.export_key}</code>{e.profiles ? '' : <> · {formatPeriod(e.period.start, e.period.end)} ({e.period.timezone})</>} · created {fmtDateTime(e.created_at)}</>} actions={<><StatusBadge s={e.status} /><Link className="btn" to="/chatgpt">All packages</Link></>} />
           <div className="grid two">
             <Card title="1. Download context package" actions={<a className="btn primary" href={`/api/chatgpt/exports/${e.export_key}/package`}><Download /> Download context package</a>}>
               <div className="stack tight small">
                 <div>{Object.entries(e.counts).map(([k, n]) => `${n} ${humanize(k).toLowerCase()}`).join(' · ')}{e.platform_accounts ? ` · ${e.platform_accounts} platform accounts` : ''} · {formatNumberIN(Math.round(e.size / 1024))} KB</div>
                 <div className="muted">Questions: {e.questions.length}. The response schema and record versions are inside the file.</div>
+                {e.links.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>{e.links.map((l: Row) => <li key={l.link}>{l.link} — {l.matched ? <Link to={refLink(l.matched) ?? '#'}>already in the roster</Link> : l.ambiguous ? 'matches several creators — you choose on import' : 'new creator'}</li>)}</ul>}
                 {e.missing.length > 0 && <div className="alert warn"><strong>Missing data flagged in the package</strong><ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{e.missing.map((m: Row, i: number) => <li key={i}>{m.name ?? m.record}: {m.item} — {m.reason}</li>)}</ul></div>}
               </div>
             </Card>
             <Card title="2. Copy ChatGPT prompt" actions={<button className="btn primary" disabled={!prompt.data} onClick={() => copyText(prompt.data!.prompt)}><Copy /> Copy ChatGPT prompt</button>}>
               <div className="stack tight">
-                {e.connector && <label className="check small"><input type="checkbox" checked={mode === 'connector'} onChange={(x) => setMode(x.target.checked ? 'connector' : 'standard')} /> Ask ChatGPT to use my Instagram analytics connector (e.g. Windsor.ai or another provider I connected in ChatGPT)</label>}
+                {e.connector && !e.profiles && <label className="check small"><input type="checkbox" checked={mode === 'connector'} onChange={(x) => setMode(x.target.checked ? 'connector' : 'standard')} /> Ask ChatGPT to use my Instagram analytics connector (e.g. Windsor.ai or another provider I connected in ChatGPT)</label>}
                 <label className="check small"><input type="checkbox" checked={inline} onChange={(x) => setInline(x.target.checked)} /> Put the data in the prompt instead of attaching the file</label>
                 <textarea className="input mono" rows={9} readOnly value={prompt.data?.prompt ?? 'Loading…'} onFocus={(x) => x.target.select()} />
                 {e.connector && <p className="small muted">Connector availability, account permissions, supported metrics and free-plan limits vary by provider. Connecting a provider in ChatGPT does not connect it to Socialmog HQ — never paste connector credentials here. If the connector can't retrieve something, the prompt tells ChatGPT to report it as unavailable and ask you for a manual export.</p>}
@@ -264,14 +274,14 @@ function ExportPage() {
               <ImportPanel exportKey={e.export_key} />
             </div>
           </Card>
-          <Card title="4. Generate PDF" hint="Website figures are calculated by Socialmog HQ; imported commentary is added in a separate, labelled section">
+          {!e.profiles && <Card title="4. Generate PDF" hint="Website figures are calculated by Socialmog HQ; imported commentary is added in a separate, labelled section">
             <div className="row">
               {!applied && <span className="small muted">No ChatGPT result applied yet — a PDF now contains website figures only.</span>}
               {applied && <span className="small">Result {applied.result_id} applied {fmtDateTime(applied.applied_at)}.</span>}
               <span className="grow" />
               {pdf ? <ImportedPdfLink e={e} importId={applied?.id} /> : <span className="small muted">This analysis type has no PDF template; save the analysis and create tasks instead.</span>}
             </div>
-          </Card>
+          </Card>}
         </div>
       );
     }}</Async>
@@ -365,17 +375,22 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
     metrics: Object.fromEntries(pv.connector.map((c: Row) => [c.index, { on: c.storable && c.permitted && !c.unresolved, resolve_ref: '', choices: {} as Row, posts: true, replace_posts: false }])) as Record<number, Row>,
     tasks: Object.fromEntries(pv.tasks.map((t: Row) => [t.id, { on: false, owner_id: me.user.id, priority: t.priority, due_date: t.due_date ?? '', related_ref: t.related_error ? '' : undefined }])) as Record<string, Row>,
     changes: Object.fromEntries(pv.changes.map((c: Row) => [c.id, { on: c.applicable && !c.financial && !c.stale && !c.unresolved, resolve_ref: '', confirm_financial: false, acknowledge_stale: false }])) as Record<string, Row>,
+    profiles: Object.fromEntries((pv.profiles ?? []).map((p: Row) => [p.index, {
+      on: p.usable && p.permitted && !p.problem && !p.possible_matches.length, resolve_ref: '', create_new: false, relationship: 'prospect', platforms: true, posts: true, replace_posts: false,
+      fields: p.fields.filter((f: Row) => f.ok && (f.changed || !p.resolved)).map((f: Row) => f.key),
+    }])) as Record<number, Row>,
   }));
   const [busy, setBusy] = useState(false);
-  const set = (k: 'metrics' | 'tasks' | 'changes', id: string | number, patch: Row) => setS((x) => ({ ...x, [k]: { ...x[k], [id]: { ...(x[k] as Record<string, Row>)[id], ...patch } } }));
-  const on = (k: 'metrics' | 'tasks' | 'changes') => Object.entries(s[k]).filter(([, v]) => v.on);
-  const count = on('metrics').length + on('tasks').length + on('changes').length + (s.analysis ? 1 : 0);
+  const set = (k: 'metrics' | 'tasks' | 'changes' | 'profiles', id: string | number, patch: Row) => setS((x) => ({ ...x, [k]: { ...x[k], [id]: { ...(x[k] as Record<string, Row>)[id], ...patch } } }));
+  const on = (k: 'metrics' | 'tasks' | 'changes' | 'profiles') => Object.entries(s[k]).filter(([, v]) => v.on);
+  const count = on('metrics').length + on('tasks').length + on('changes').length + on('profiles').length + (s.analysis ? 1 : 0);
   const apply = async () => {
     const body = {
       analysis: s.analysis, dashboard: s.dashboard, shareable: s.shareable, recommendations: s.recommendations,
       metrics: on('metrics').map(([i, v]) => ({ index: Number(i), resolve_ref: v.resolve_ref || undefined, choices: v.choices, posts: v.posts, replace_posts: v.replace_posts })),
       tasks: on('tasks').map(([id, v]) => ({ id, owner_id: v.owner_id ? Number(v.owner_id) : null, priority: v.priority, due_date: v.due_date || null, related_ref: v.related_ref })),
       changes: on('changes').map(([id, v]) => ({ id, resolve_ref: v.resolve_ref || undefined, confirm_financial: v.confirm_financial, acknowledge_stale: v.acknowledge_stale })),
+      profiles: on('profiles').map(([i, v]) => ({ index: Number(i), resolve_ref: v.resolve_ref || undefined, create_new: v.create_new, relationship: v.relationship, fields: v.fields, platforms: v.platforms, posts: v.posts, replace_posts: v.replace_posts })),
     };
     const ok = await confirmAction({ title: `Apply ${count} selected item${count === 1 ? '' : 's'}?`, message: 'Everything is applied together: if any item fails, nothing is changed. Applied changes are audited and can be undone.', confirm: 'Apply' });
     if (ok === false) return;
@@ -389,7 +404,7 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
   const obs = (type: string) => pv.observations.filter((o: Row) => o.type === type);
   return (
     <div className="stack">
-      <PageHead title="Review ChatGPT result" sub={<>{pv.export.label} · package <Link to={`/chatgpt/exports/${pv.export.key}`}><code>{pv.export.key}</code></Link> · result <code>{pv.result_id}</code> · generated {fmtDateTime(pv.generated_at)} · {formatPeriod(pv.reporting_period.start, pv.reporting_period.end)}</>} actions={<Badge tone="warn">Not applied yet</Badge>} />
+      <PageHead title="Review ChatGPT result" sub={<>{pv.export.label} · package <Link to={`/chatgpt/exports/${pv.export.key}`}><code>{pv.export.key}</code></Link> · result <code>{pv.result_id}</code> · generated {fmtDateTime(pv.generated_at)}{pv.profiles?.length ? '' : <> · {formatPeriod(pv.reporting_period.start, pv.reporting_period.end)}</>}</>} actions={<Badge tone="warn">Not applied yet</Badge>} />
       {pv.parse_notes?.map((n: string) => <div key={n} className="alert info small">{n}</div>)}
       {!pv.period_matches && <div className="alert warn small">The result's reporting period differs from the package ({formatPeriod(pv.export.period.start, pv.export.period.end)}).</div>}
       {pv.version_mismatch.length > 0 && <div className="alert warn small">ChatGPT changed the source record versions for {pv.version_mismatch.length} record(s); stale checks use the versions saved with the package.</div>}
@@ -408,6 +423,12 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
       <Card title="Summary">
         <AiBox><div className="pre">{pv.summary}</div>{pv.provenance.length > 0 && <div className="small muted">Sources: {pv.provenance.map((p: Row) => `${p.source} (${humanize(p.kind)}${p.retrieved_at ? `, ${fmtDateTime(p.retrieved_at)}` : ''})`).join(' · ')}</div>}</AiBox>
       </Card>
+
+      {pv.profiles?.length > 0 && (
+        <Card title="Creator profiles" hint="Read by ChatGPT from public profiles, a connector or your screenshots. Saved with their source as user-imported data — not verified by Socialmog HQ. Nothing is matched by guesswork.">
+          <div className="stack">{pv.profiles.map((p: Row) => <ProfileItem key={p.index} p={p} st={s.profiles[p.index]} set={(patch) => set('profiles', p.index, patch)} />)}</div>
+        </Card>
+      )}
 
       {pv.connector.length > 0 && (
         <Card title="Retrieved metrics" hint="Connector data pasted through ChatGPT. Saved as user-imported data with its source and retrieval time — not independently verified by Socialmog HQ. Existing values are kept unless you choose otherwise.">
@@ -552,6 +573,79 @@ function Review({ d, onDone }: { d: Row; onDone: () => void }) {
         <Link className="btn" to={`/chatgpt/exports/${pv.export.key}`}>Cancel</Link>
         <button className="btn primary" disabled={busy || count === 0} onClick={apply}>Apply selected</button>
       </div>
+    </div>
+  );
+}
+
+const compactN = (n: number | null | undefined) => (n == null ? '—' : formatNumberIN(n, { compact: true }));
+
+/** One creator profile from ChatGPT: who it is (new / existing / your choice), field diffs, channels and recent videos. */
+function ProfileItem({ p, st, set }: { p: Row; st: Row; set: (patch: Row) => void }) {
+  const name = p.fields.find((f: Row) => f.key === 'name')?.proposed ?? p.fields.find((f: Row) => f.key === 'handle')?.proposed ?? p.link;
+  const target = p.resolved ? 'existing' : st.resolve_ref ? 'chosen' : 'new';
+  const usable = p.content.filter((c: Row) => c.usable);
+  const fresh = usable.filter((c: Row) => !c.exists).length;
+  const conflicts = usable.filter((c: Row) => c.conflict).length;
+  const needsDecision = target === 'new' && (p.problem || p.possible_matches.length > 0) && !st.create_new;
+  return (
+    <div className="card stack tight">
+      <div className="row">
+        <label className="check"><input type="checkbox" checked={st.on} disabled={!p.usable || !p.permitted} onChange={(e) => set({ on: e.target.checked })} />{' '}
+          <strong>{target === 'existing' ? <>Update <Link to={p.resolved.link}>{p.resolved.label}</Link></> : target === 'chosen' ? 'Update the creator chosen below' : `Add new creator: ${name}`}</strong></label>
+        <Badge tone={p.status === 'retrieved' ? 'good' : p.status === 'partial' ? 'warn' : 'bad'}>{humanize(p.status)}</Badge>
+        <span className="small muted">{/^https?:\/\//i.test(p.link) ? <a href={p.link} target="_blank" rel="noreferrer">{p.link}</a> : p.link} · {p.source}{p.retrieved_at ? ` · retrieved ${fmtDateTime(p.retrieved_at)}` : ''}</span>
+      </div>
+      {!p.permitted && <div className="small neg">Your role cannot change creator profiles.</div>}
+      {!p.usable && <div className="small neg">ChatGPT could not read this profile ({p.status}). Ask it to work from screenshots, then import the new result.</div>}
+      {p.problem && <label className="field"><span>{p.problem}</span><RefSelect entity="influencers" value={st.resolve_ref} onChange={(ref) => set({ resolve_ref: ref, on: !!ref && p.usable && p.permitted })} /></label>}
+      {!p.resolved && !p.problem && p.possible_matches.length > 0 && (
+        <div className="alert warn small stack tight">
+          <span>This handle or link is already in the roster: {p.possible_matches.map((m: Row, i: number) => <span key={m.ref}>{i ? ', ' : ''}<Link to={m.link}>{m.label}</Link></span>)}. Choose what to do:</span>
+          <RefSelect entity="influencers" value={st.resolve_ref} placeholder="Update an existing creator…" onChange={(ref) => set({ resolve_ref: ref, create_new: false, on: !!ref && p.usable && p.permitted })} />
+          <label className="check"><input type="checkbox" checked={st.create_new} onChange={(e) => set({ create_new: e.target.checked, resolve_ref: '', on: e.target.checked && p.usable && p.permitted })} /> It is a different person — add as a new creator</label>
+        </div>
+      )}
+      {target === 'new' && !needsDecision && (
+        <label className="field" style={{ maxWidth: 260 }}><span>Add to the roster as</span><select className="input" value={st.relationship} onChange={(e) => set({ relationship: e.target.value })}>{['prospect', 'campaign_only', 'non_exclusive', 'exclusive', 'agency_owned'].map((r) => <option key={r} value={r}>{humanize(r)}</option>)}</select></label>
+      )}
+      {p.issues.length > 0 && <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>{p.issues.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>}
+      {p.bio && <div className="small muted pre">Bio: {p.bio}</div>}
+      {p.fields.length > 0 && (
+        <div className="table-wrap"><table className="table small">
+          <thead><tr><th /><th>Field</th><th>Now</th><th>From ChatGPT</th></tr></thead>
+          <tbody>{p.fields.map((f: Row) => (
+            <tr key={f.key}>
+              <td><input type="checkbox" aria-label={`Use ${f.label}`} disabled={!f.ok} checked={st.fields.includes(f.key)} onChange={(e) => set({ fields: e.target.checked ? [...st.fields, f.key] : st.fields.filter((k: string) => k !== f.key) })} /></td>
+              <td>{f.label}{f.inferred && <> <Badge tone="warn">inferred</Badge></>}</td>
+              <td className="pre">{target === 'existing' ? show(f.current) : <span className="muted">{target === 'new' ? 'new' : 'see the chosen creator'}</span>}</td>
+              <td className="pre">{f.ok ? <span className={f.changed || target !== 'existing' ? 'strong' : 'muted'}>{show(f.proposed)}{target === 'existing' && !f.changed ? ' (same)' : ''}</span> : <span className="neg">{f.error}</span>}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      {p.platforms.length > 0 && (
+        <div className="table-wrap"><table className="table small">
+          <thead><tr><th>Channel</th><th>Link</th><th className="num">Followers now</th><th className="num">From ChatGPT</th></tr></thead>
+          <tbody>{p.platforms.map((x: Row, i: number) => (
+            <tr key={i}><td>{platformName(x.platform)}{x.is_new && <> <Badge tone="info">new</Badge></>}</td><td>{x.url ? <a href={x.url} target="_blank" rel="noreferrer">@{x.username ?? x.url}</a> : <span className="muted">—</span>}</td>
+              <td className="num">{compactN(x.current_followers)}</td><td className="num strong">{compactN(x.followers)}</td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      <div className="row small">
+        <label className="check"><input type="checkbox" checked={st.platforms} onChange={(e) => set({ platforms: e.target.checked })} /> Save channel links and follower counts</label>
+        <label className="check"><input type="checkbox" checked={st.posts} disabled={!fresh && !conflicts} onChange={(e) => set({ posts: e.target.checked })} /> Save {fresh} new post{fresh === 1 ? '' : 's'}/video{fresh === 1 ? '' : 's'}</label>
+        {conflicts > 0 && <label className="check"><input type="checkbox" checked={st.replace_posts} onChange={(e) => set({ replace_posts: e.target.checked })} /> Update views on {conflicts} already saved</label>}
+      </div>
+      {Object.entries(p.avg_after).some(([, a]) => a) && <div className="small">Prev. avg views after saving: {Object.entries(p.avg_after).filter(([, a]) => a).map(([pl, a]: [string, any]) => `${platformName(pl)} ${compactN(a.avg)} (last ${a.posts} posts, boosted excluded)`).join(' · ')}</div>}
+      {usable.length > 0 && (
+        <details className="small"><summary>{usable.length} recent posts/videos</summary>
+          <table className="table small"><tbody>{usable.map((c: Row) => (
+            <tr key={c.j}><td>{platformName(c.platform)}</td><td><a href={c.url} target="_blank" rel="noreferrer">{c.topic ?? humanize(c.format ?? 'post')}</a>{c.promotion === 'paid' && <> <Badge tone="warn">paid</Badge></>}{c.exists && <> <Badge>saved</Badge></>}</td><td>{fmtDateTime(c.published_at)}</td><td className="num">{c.views == null ? <span className="muted">—</span> : formatNumberIN(c.views)} views</td></tr>
+          ))}</tbody></table>
+        </details>
+      )}
+      {st.on && needsDecision && <div className="small neg">Choose the creator or confirm a new one before applying.</div>}
     </div>
   );
 }

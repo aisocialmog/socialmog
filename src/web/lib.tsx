@@ -1115,11 +1115,11 @@ export function ThemeToggle() {
 
 
 /** "Analyse with ChatGPT": opens the Manual ChatGPT analysis form pre-filled for these records. */
-export function AnalyseButton({ type, ids = [], cap = 'staff', period }: { type: string; ids?: number[]; cap?: Cap; period?: string }) {
+export function AnalyseButton({ type, ids = [], cap = 'staff', period, label = 'Analyse with ChatGPT' }: { type: string; ids?: number[]; cap?: Cap; period?: string; label?: string }) {
   const me = useMe();
   if (me.user.role === 'editor' || !can(me.user.role, cap)) return null;
   const q = new URLSearchParams({ type, ...(ids.length ? { ids: ids.join(',') } : {}), ...(period ? { period } : {}) });
-  return <Link className="btn" to={`/chatgpt/new?${q}`} title="Manual ChatGPT analysis: export a package and prompt for your own ChatGPT"><Sparkles /> Analyse with ChatGPT</Link>;
+  return <Link className="btn" to={`/chatgpt/new?${q}`} title="Manual ChatGPT analysis: export a package and prompt for your own ChatGPT"><Sparkles /> {label}</Link>;
 }
 
 export function Gate({ cap, children }: { cap: Cap; children: ReactNode }) {
