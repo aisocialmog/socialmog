@@ -2,7 +2,9 @@
  * Domain rules that span records: write hooks, deal → campaign conversion, roster → payables,
  * content workflow, reliability, shortlisting, campaign health and the founder dashboard.
  */
-import type { Express, Request } from 'express';
+import express, { type Express, type Request } from 'express';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { addDays, diffDays, financialYearStart, formatDate, weekStart } from '../shared/dates.ts';
 import { dealEconomics, mean, median, pctChange, STAGE_PROBABILITY } from '../shared/calc.ts';
 import { formatINR, splitProportional } from '../shared/money.ts';
@@ -380,6 +382,73 @@ export function shortlist(db: Db, q: ShortlistQuery, canSeeRates: boolean) {
   return results.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 }
 
+// ---------------------------------------------------------------- roster & media kit figures
+
+const KIT_POSTS = 10;
+const LINK: Record<string, (h: string) => string> = { instagram: (h) => `https://www.instagram.com/${h}/`, youtube: (h) => `https://www.youtube.com/@${h}` };
+
+/**
+ * Per-creator figures for the roster and brand media kits: channel links, followers, previous average views
+ * (last organic posts, else the profile figure with its source), engagement, brand-facing commercials, past
+ * collaborations and top content. Every figure carries its basis; nothing is estimated.
+ * Commercials use the rate card's brand price (falling back to the rate card); negotiated rates and commissions never appear.
+ */
+export function creatorStats(db: Db, ids: number[] | null, opts: { commercials: boolean }): Map<number, Row> {
+  const infs = all(db, `SELECT * FROM influencers WHERE archived_at IS NULL ${ids ? `AND id IN (${ids.map(Number).join(',') || 'NULL'})` : ''}`).map((r) => decode('influencers', r)!);
+  const idList = infs.map((i) => i.id).join(',') || 'NULL';
+  const posts = all(db, `SELECT influencer_id, platform, permalink, published_at, format, topic, promotion, metrics FROM posts WHERE archived_at IS NULL AND published_at IS NOT NULL AND influencer_id IN (${idList}) ORDER BY published_at DESC`)
+    .map((p) => ({ ...p, metrics: JSON.parse(p.metrics ?? '{}') }))
+    .filter((p) => typeof p.metrics.views === 'number');
+  const snaps = all(db, `SELECT influencer_id, platform, period_end, metrics, source FROM analytics_snapshots WHERE archived_at IS NULL AND influencer_id IN (${idList}) ORDER BY period_start DESC`)
+    .map((x) => ({ ...x, followers: JSON.parse(x.metrics ?? '{}').followers_end ?? null }));
+  const collabs = all(db, `SELECT DISTINCT cc.influencer_id, b.name FROM campaign_creators cc JOIN campaigns c ON c.id = cc.campaign_id JOIN brands b ON b.id = c.brand_id
+    WHERE cc.status = 'confirmed' AND cc.archived_at IS NULL AND c.archived_at IS NULL AND c.stage IN ('live','reporting','financial_closure') AND cc.influencer_id IN (${idList}) ORDER BY b.name`);
+  const out = new Map<number, Row>();
+  for (const i of infs) {
+    const platforms = ((i.platforms ?? []) as Row[]).map((p) => {
+      const handle = p.handle ? String(p.handle).replace(/^@/, '') : null;
+      const mine = posts.filter((x) => x.influencer_id === i.id && x.platform === p.platform && x.promotion !== 'paid').slice(0, KIT_POSTS);
+      const enough = mine.length >= 3;
+      const views = mine.map((x) => x.metrics.views as number);
+      const reached = mine.filter((x) => x.metrics.reach > 0);
+      const interactions = (x: Row) => ['likes', 'comments', 'shares', 'saves'].reduce((a, k) => a + (Number(x.metrics[k]) || 0), 0);
+      const snap = snaps.find((x) => x.influencer_id === i.id && x.platform === p.platform && x.followers != null);
+      const fromSnap = !!snap && (!p.updated_at || snap.period_end >= String(p.updated_at).slice(0, 10));
+      const profileBasis = `${p.source ?? 'Profile entry'}${p.updated_at ? `, as of ${formatDate(p.updated_at)}` : ''}`;
+      return {
+        platform: p.platform, handle, url: p.url ?? (handle && LINK[p.platform] ? LINK[p.platform](handle) : null),
+        followers: fromSnap ? snap!.followers : p.followers ?? null,
+        followers_basis: fromSnap ? `Weekly snapshot, week ending ${formatDate(snap!.period_end)}` : p.followers != null ? profileBasis : null,
+        avg_views: enough ? Math.round(mean(views)!) : p.avg_views ?? null,
+        median_views: enough ? Math.round(median(views)!) : p.median_views ?? null,
+        views_basis: enough ? `Last ${mine.length} organic posts, ${formatDate(mine[mine.length - 1].published_at)} – ${formatDate(mine[0].published_at)}` : p.avg_views != null ? profileBasis : null,
+        engagement_rate: reached.length >= 3 ? Math.round((reached.reduce((a, x) => a + interactions(x), 0) / reached.reduce((a, x) => a + x.metrics.reach, 0)) * 10_000) / 100 : p.engagement_rate ?? null,
+        engagement_basis: reached.length >= 3 ? `(likes + comments + shares + saves) ÷ reach, last ${reached.length} organic posts` : p.engagement_rate != null ? profileBasis : null,
+      };
+    });
+    const commercials = opts.commercials
+      ? ((i.rate_card ?? []) as Row[]).map((r) => ({ deliverable: r.deliverable, platform: r.platform ?? null, price: r.brand_rate ?? r.rate ?? null })).filter((r) => r.price != null)
+      : null;
+    out.set(i.id, {
+      id: i.id, name: i.name, handle: i.handle, photo: !!i.photo_file, photo_url: i.photo_url ?? null, updated_at: i.updated_at ?? i.created_at,
+      niches: i.niches ?? [], city: i.city, state: i.state, languages: i.languages ?? [], availability: i.availability, relationship: i.relationship,
+      audience: i.audience ?? null, platforms,
+      commercials, starting_price: commercials?.length ? Math.min(...commercials.map((c) => c.price)) : null,
+      collaborations: collabs.filter((c) => c.influencer_id === i.id).map((c) => c.name),
+      top_content: posts.filter((x) => x.influencer_id === i.id && x.promotion !== 'paid' && x.permalink).sort((a, b) => b.metrics.views - a.metrics.views).slice(0, 3)
+        .map((x) => ({ url: x.permalink, platform: x.platform, format: x.format, topic: x.topic, views: x.metrics.views, published_at: x.published_at })),
+    });
+  }
+  return out;
+}
+
+/** Uploaded creator photo (PNG/JPEG only, so PDFs can embed it). */
+export function photoPath(dataDir: string, inf: Row): string | null {
+  if (!inf?.photo_file) return null;
+  const p = join(dataDir, 'uploads', 'photos', inf.photo_file);
+  return existsSync(p) ? p : null;
+}
+
 // ---------------------------------------------------------------- campaign health
 
 export function campaignHealth(db: Db, t: string, withFinance: boolean): Row[] {
@@ -575,7 +644,7 @@ export function dashboard(db: Db, user: User) {
 
 // ---------------------------------------------------------------- routes
 
-export function domainRoutes(app: Express, _opts: AppOptions) {
+export function domainRoutes(app: Express, opts: AppOptions) {
   app.get('/api/dashboard', (req, res) => {
     const u = requireInternal(req);
     if (u.role === 'editor') throw new HttpError(403, 'Editors use the content workspace');
@@ -591,6 +660,52 @@ export function domainRoutes(app: Express, _opts: AppOptions) {
     const u = requireCap(req, 'staff');
     if (u.role === 'editor') throw new HttpError(403, 'Not available');
     res.json({ rows: shortlist(req.db, req.body ?? {}, can(u.role, 'rates')) });
+  });
+
+  app.get('/api/influencers/stats', (req, res) => {
+    const u = requireInternal(req);
+    if (u.role === 'editor' || !scopeFor(u, ENTITY.influencers)) throw new HttpError(403, 'Not allowed');
+    res.json({ rows: [...creatorStats(req.db, null, { commercials: can(u.role, 'rates') }).values()] });
+  });
+
+  // Creator photo / logo for the roster and media kits.
+  const photoDir = join(opts.dataDir, 'uploads', 'photos');
+  app.post('/api/influencers/:id/photo', express.raw({ type: () => true, limit: '3mb' }), (req, res) => {
+    const u = requireCap(req, 'talent');
+    const inf = get(req.db, 'SELECT * FROM influencers WHERE id = ? AND archived_at IS NULL', Number(req.params.id));
+    if (!inf) throw new HttpError(404, 'Creator not found');
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || !body.length) throw new HttpError(400, 'Empty file');
+    // Check the bytes, not the declared type.
+    const ext = body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'png' : body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff ? 'jpg' : null;
+    if (!ext) throw new HttpError(400, 'Upload a PNG or JPEG image');
+    mkdirSync(photoDir, { recursive: true });
+    if (inf.photo_file) rmSync(join(photoDir, inf.photo_file), { force: true });
+    const file = `influencer-${inf.id}-${Date.now()}.${ext}`;
+    writeFileSync(join(photoDir, file), body);
+    update(req.db, 'influencers', inf.id, { photo_file: file });
+    audit(req.db, u.id, 'upload', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: file, size: body.length });
+    res.json({ ok: true });
+  });
+
+  app.delete('/api/influencers/:id/photo', (req, res) => {
+    const u = requireCap(req, 'talent');
+    const inf = get(req.db, 'SELECT * FROM influencers WHERE id = ?', Number(req.params.id));
+    if (!inf) throw new HttpError(404, 'Creator not found');
+    if (inf.photo_file) rmSync(join(photoDir, inf.photo_file), { force: true });
+    update(req.db, 'influencers', inf.id, { photo_file: null });
+    audit(req.db, u.id, 'delete', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: null });
+    res.json({ ok: true });
+  });
+
+  app.get('/api/influencers/:id/photo', (req, res) => {
+    const u = requireInternal(req);
+    if (u.role === 'editor' || !scopeFor(u, ENTITY.influencers)) throw new HttpError(403, 'Not allowed');
+    const path = photoPath(opts.dataDir, get(req.db, 'SELECT photo_file FROM influencers WHERE id = ?', Number(req.params.id)) ?? {});
+    if (!path) throw new HttpError(404, 'No photo');
+    res.setHeader('Content-Type', path.endsWith('.png') ? 'image/png' : 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(readFileSync(path));
   });
 
   app.get('/api/influencers/:id/overview', (req, res) => {

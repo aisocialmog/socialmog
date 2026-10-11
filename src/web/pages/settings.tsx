@@ -13,6 +13,7 @@ export function Settings() {
     ['/settings/payments', 'My payments', me.user.role === 'editor'],
     ['/settings/users', 'Users & roles', admin],
     ['/settings/finance', 'Finance rules', admin],
+    ['/settings/agency', 'Agency & media kit', admin],
     ['/settings/automation', 'Automation', admin],
     ['/settings/data', 'Data & backups', admin],
     ['/settings/audit', 'Audit log', admin],
@@ -26,6 +27,7 @@ export function Settings() {
         <Route path="users" element={<Users />} />
         <Route path="users/:id" element={<UserPage />} />
         <Route path="finance" element={<FinanceRules />} />
+        <Route path="agency" element={<Agency />} />
         <Route path="automation" element={<Automation />} />
         <Route path="data" element={<Data />} />
         <Route path="audit" element={<Audit />} />
@@ -176,6 +178,28 @@ function FinanceRules() {
         </div>
       );
     }}</Async>
+  );
+}
+
+function Agency() {
+  const s = useApi<Row>('/api/settings');
+  const [v, setV] = useState<Row | null>(null);
+  const cur: Row = v ?? s.data?.agency ?? {};
+  const field = (k: string, label: string, type = 'text') => <label className="field"><span>{label}</span><input className="input" type={type} value={cur[k] ?? ''} onChange={(e) => setV({ ...cur, [k]: e.target.value || null })} /></label>;
+  return (
+    <div className="stack">
+      <PageHead title="Agency & media kit" sub="Shown on brand media kits under “Work with us”. Creator contact details are never printed on kits." />
+      <Card>
+        <div className="form-grid">
+          {field('name', 'Agency name')}
+          {field('email', 'Brand enquiries email', 'email')}
+          {field('phone', 'Phone')}
+          {field('website', 'Website', 'url')}
+          <label className="field full"><span>Note printed on every kit</span><textarea className="input" rows={3} value={cur.kit_note ?? ''} placeholder="Prices are per deliverable, exclude GST, and depend on usage rights, exclusivity and timelines…" onChange={(e) => setV({ ...cur, kit_note: e.target.value || null })} /></label>
+        </div>
+        <div className="row"><span className="grow" /><button className="btn primary" disabled={!v} onClick={async () => { if (await attempt(() => api('/api/settings/agency', { method: 'PUT', body: { value: cur } }), 'Saved')) { setV(null); s.reload(); } }}>Save</button></div>
+      </Card>
+    </div>
   );
 }
 

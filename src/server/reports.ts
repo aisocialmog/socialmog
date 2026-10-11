@@ -12,11 +12,11 @@ import { formatINR, formatNumberIN, paiseToRupeesString } from '../shared/money.
 import { barChart, lineChart, SERIES_LIGHT, THEME_PRINT } from '../shared/charts.ts';
 import { dealEconomics } from '../shared/calc.ts';
 import { can, humanize, type Cap } from '../shared/schema.ts';
-import { all, audit, decode, get, HttpError, insert, run, update, type Db, type Row, type User } from './db.ts';
+import { all, audit, decode, get, getSetting, HttpError, insert, run, update, type Db, type Row, type User } from './db.ts';
 import { founders, notify, requireUser, toCsv } from './app.ts';
 import { accountBalances, ageing, campaignFinancials, cashflowByPeriod, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, today } from './finance.ts';
 import { forecast, SCENARIOS } from './forecast.ts';
-import { campaignHealth, dashboard, editorWorkload, influencerTrends } from './domain.ts';
+import { campaignHealth, creatorStats, dashboard, editorWorkload, influencerTrends, photoPath } from './domain.ts';
 import { analyseWeek, enrich } from './analytics.ts';
 import { enqueue, onTick, registerJob, runDueJobs } from './jobs.ts';
 import { canUse, TYPES as AI_TYPES } from './chatgpt.ts';
@@ -34,8 +34,8 @@ const W = 515; // A4 width minus margins, in points
 
 type Content = any;
 interface Col { label: string; key: string; money?: boolean; num?: boolean; width?: string | number; link?: string }
-interface Built { title: string; subtitle: string; summary: string[]; content: Content[]; csv: { name: string; columns: Col[]; rows: Row[] }[]; data: Row; recipient?: string }
-interface Ctx { db: Db; params: Row; audience: 'internal' | 'external'; today: string; user: User | null; from: string; to: string; sections: (k: string) => boolean }
+interface Built { title: string; subtitle: string; summary: string[]; content: Content[]; csv: { name: string; columns: Col[]; rows: Row[] }[]; data: Row; recipient?: string; asOf?: string }
+interface Ctx { db: Db; params: Row; audience: 'internal' | 'external'; today: string; user: User | null; from: string; to: string; sections: (k: string) => boolean; dataDir: string }
 
 // ---------------------------------------------------------------- pdf building blocks
 
@@ -90,7 +90,7 @@ export async function renderPdf(b: Built, meta: { audience: string; generatedAt:
     content: [
       { text: b.title, style: 'h1' },
       { text: b.subtitle, color: MUTED, margin: [0, 0, 0, 2] },
-      { text: `Reporting period: ${meta.period}   ·   Generated ${meta.generatedAt}`, fontSize: 8, color: MUTED, margin: [0, 0, 0, 6] },
+      { text: `${b.asOf ?? `Reporting period: ${meta.period}`}   ·   Generated ${meta.generatedAt}`, fontSize: 8, color: MUTED, margin: [0, 0, 0, 6] },
       summaryBox(b.summary),
       ...b.content,
     ],
@@ -537,37 +537,118 @@ export const REPORTS: Record<string, ReportDef> = {
   },
 
   roster: {
-    label: 'Shareable creator roster',
+    label: 'Brand media kit',
     internalCap: 'staff',
     externalCap: 'staff',
-    sections: ['roster', 'chatgpt'],
+    sections: ['overview', 'comparison', 'profiles', 'commercials', 'collaborations', 'top_content', 'chatgpt'],
     ai: { types: ['brand_proposal'], explicitOnly: true },
-    build: (c) => {
-      const ids: number[] = Array.isArray(c.params.influencer_ids) ? c.params.influencer_ids.map(Number) : [];
-      const rows = all(c.db, `SELECT * FROM influencers WHERE archived_at IS NULL AND relationship NOT IN ('inactive','prospect','agency_owned') ${ids.length ? `AND id IN (${ids.join(',')})` : ''} ORDER BY name`).map((r) => decode('influencers', r)!);
-      // Public fields only: never commissions, rates, identity or internal notes.
-      const content: Content[] = rows.map((r) => ({
-        stack: [
-          { text: `${r.name}  ${r.handle ?? ''}`, bold: true, fontSize: 11 },
-          { text: [r.city, (r.niches ?? []).join(', '), (r.languages ?? []).join(', ')].filter(Boolean).join(' · '), color: MUTED, fontSize: 8.5 },
-          table([{ label: 'Platform', key: 'pl', link: 'url' }, { label: 'Followers', key: 'followers', num: true }, { label: 'Avg views', key: 'avg_views', num: true }, { label: 'Engagement', key: 'er' }, { label: 'Source / as of', key: 'src' }], (r.platforms ?? []).map((p: Row) => ({ ...p, pl: humanize(p.platform), er: p.engagement_rate != null ? `${p.engagement_rate}%` : 'Unavailable', src: `${p.source ?? 'Unknown'}${p.updated_at ? `, ${formatDate(p.updated_at)}` : ''}` }))),
-          ...(r.audience?.summary ? [{ text: `Audience: ${r.audience.summary} (${r.audience.source ?? 'source unknown'})`, fontSize: 8.5, margin: [0, 0, 0, 4] }] : []),
-        ],
-        margin: [0, 0, 0, 10],
-        unbreakable: true,
-      }));
-      return {
-        title: 'Socialmog creator roster',
-        subtitle: 'Creators available for brand collaborations',
-        recipient: c.params.recipient ?? 'brand partners',
-        summary: [`${rows.length} creators. Metrics show their source and date; unavailable figures are marked as such.`],
-        content,
-        csv: [{ name: 'Roster', columns: [{ label: 'Name', key: 'name' }, { label: 'Handle', key: 'handle' }, { label: 'City', key: 'city' }, { label: 'Niches', key: 'niches' }], rows }],
-        data: { creators: rows.length },
-      };
-    },
+    build: mediaKit,
   },
 };
+
+// ---------------------------------------------------------------- brand media kit
+
+const titleCase = (s: string) => s.replace(/(^|[\s/-])\w/g, (m) => m.toUpperCase());
+const BRANDED: Record<string, string> = { youtube: 'YouTube', youtube_video: 'YouTube video', x: 'X', linkedin: 'LinkedIn', ugc: 'UGC' };
+const nice = (k: string | null | undefined) => (k ? BRANDED[k] ?? humanize(k) : '—');
+const compact = (n: number | null | undefined) => (n == null ? '—' : formatNumberIN(n, { compact: true }));
+
+/**
+ * Media kit for brands: the whole roster grouped by category, or one category.
+ * Public-facing fields only — never commissions, negotiated rates, identity, contacts or internal notes.
+ */
+function mediaKit(c: Ctx): Built {
+  const ids: number[] | null = Array.isArray(c.params.influencer_ids) && c.params.influencer_ids.length ? c.params.influencer_ids.map(Number) : null;
+  const category = typeof c.params.category === 'string' && c.params.category.trim() ? c.params.category.trim().toLowerCase() : null;
+  const withPrices = c.sections('commercials') && (!c.user || can(c.user.role, 'rates'));
+  const rows = [...creatorStats(c.db, ids, { commercials: withPrices }).values()]
+    .filter((r) => ids || !['inactive', 'prospect', 'agency_owned'].includes(r.relationship))
+    .filter((r) => !category || r.niches.some((n: string) => n.toLowerCase() === category))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (!rows.length) throw new HttpError(400, category ? `No active creators in the "${category}" category` : 'No creators to include');
+  // Whole roster: each creator appears once, under their first (primary) category.
+  const groups = new Map<string, Row[]>();
+  for (const r of rows) {
+    const key = category ?? (r.niches[0] ? String(r.niches[0]).toLowerCase() : 'other');
+    groups.set(key, [...(groups.get(key) ?? []), r]);
+  }
+  const ordered = [...groups.entries()].sort(([a], [b]) => (a === 'other' ? 1 : b === 'other' ? -1 : a.localeCompare(b)));
+  const agency = getSetting<Row>(c.db, 'agency', {});
+  const plat = (r: Row, p: string) => r.platforms.find((x: Row) => x.platform === p);
+  const sum = (list: Row[], p: string) => list.reduce((a, r) => a + (plat(r, p)?.followers ?? 0), 0);
+  const photos = new Map(all(c.db, `SELECT id, photo_file FROM influencers WHERE id IN (${rows.map((r) => r.id).join(',')})`).map((x) => {
+    const path = photoPath(c.dataDir, x);
+    return [x.id, path ? `data:image/${path.endsWith('.png') ? 'png' : 'jpeg'};base64,${readFileSync(path).toString('base64')}` : null];
+  }));
+
+  const avatar = (r: Row): Content => (photos.get(r.id)
+    ? { image: photos.get(r.id), fit: [58, 58], width: 58 }
+    : { width: 58, table: { widths: [58], heights: [58], body: [[{ text: r.name.slice(0, 1).toUpperCase(), fontSize: 24, bold: true, color: ACCENT, alignment: 'center', margin: [0, 15, 0, 0], fillColor: '#eef2ff' }]] }, layout: 'noBorders' });
+
+  const card = (r: Row): Content => {
+    const stack: Content[] = [
+      { columns: [avatar(r), { width: '*', margin: [10, 2, 0, 0], stack: [
+        { text: r.name, bold: true, fontSize: 13 },
+        { text: [r.handle, [r.city, r.state].filter(Boolean).join(', '), r.languages.join(', ')].filter(Boolean).join('  ·  '), color: MUTED, fontSize: 8.5, margin: [0, 1, 0, 3] },
+        { text: [{ text: 'Categories: ', color: MUTED }, r.niches.map((n: string) => titleCase(n)).join(', ') || '—', ...(r.availability && r.availability !== 'available' ? [{ text: `   ·   Availability: ${humanize(r.availability)}`, color: MUTED }] : [])], fontSize: 8.5 },
+      ] }], columnGap: 0, margin: [0, 0, 0, 6] },
+      table([{ label: 'Channel', key: 'ch', link: 'url' }, { label: 'Followers', key: 'f' }, { label: 'Prev. avg views', key: 'v' }, { label: 'Median views', key: 'm' }, { label: 'Engagement', key: 'er' }],
+        r.platforms.map((p: Row) => ({ ...p, ch: `${nice(p.platform)}${p.handle ? ` @${p.handle}` : ''}`, f: compact(p.followers), v: p.avg_views == null ? 'Not available' : formatNumberIN(p.avg_views), m: p.median_views == null ? '—' : formatNumberIN(p.median_views), er: p.engagement_rate == null ? '—' : `${p.engagement_rate}%` })), { fontSize: 8.5 }),
+      { text: r.platforms.filter((p: Row) => p.followers_basis || p.views_basis).map((p: Row) => `${nice(p.platform)}: followers — ${p.followers_basis ?? 'n/a'}; views — ${p.views_basis ?? 'n/a'}${p.engagement_basis ? `; engagement — ${p.engagement_basis}` : ''}`).join('\n'), fontSize: 6.5, color: MUTED, margin: [0, -6, 0, 6] },
+    ];
+    if (r.audience?.summary || r.audience?.top_cities?.length) stack.push({ text: [{ text: 'Audience: ', bold: true }, [r.audience.summary, r.audience.top_cities?.length ? `top cities ${r.audience.top_cities.join(', ')}` : null].filter(Boolean).join(' · '), { text: `  (${r.audience.source ?? 'source not recorded'}${r.audience.as_of ? `, ${formatDate(r.audience.as_of)}` : ''})`, color: MUTED, fontSize: 7 }], fontSize: 8.5, margin: [0, 0, 0, 5] });
+    if (withPrices) stack.push(r.commercials.length
+      ? table([{ label: 'Commercials', key: 'd' }, { label: 'Platform', key: 'pl' }, { label: 'Price (excl. GST)', key: 'price', money: true }], r.commercials.map((x: Row) => ({ ...x, d: nice(x.deliverable ?? 'deliverable'), pl: nice(x.platform) })), { fontSize: 8.5 })
+      : { text: [{ text: 'Commercials: ', bold: true }, 'on request'], fontSize: 8.5, margin: [0, 0, 0, 5] });
+    if (c.sections('collaborations') && r.collaborations.length) stack.push({ text: [{ text: 'Brands worked with: ', bold: true }, r.collaborations.join(', ')], fontSize: 8.5, margin: [0, 0, 0, 5] });
+    if (c.sections('top_content') && r.top_content.length) stack.push({ text: [{ text: 'Top content: ', bold: true }, ...r.top_content.flatMap((x: Row, i: number) => [i ? '  ·  ' : '', { text: `${nice(x.format ?? 'post')}${x.topic ? ` — ${x.topic}` : ''} (${compact(x.views)} views)`, link: x.url, color: ACCENT }])], fontSize: 8.5, margin: [0, 0, 0, 5] });
+    return { stack, unbreakable: true, margin: [0, 6, 0, 14] };
+  };
+
+  const content: Content[] = [];
+  if (c.sections('overview')) {
+    if (!category && ordered.length > 1) content.push(h2('Categories'), table([{ label: 'Category', key: 'cat' }, { label: 'Creators', key: 'n', num: true }, { label: 'Instagram followers', key: 'ig' }, { label: 'YouTube subscribers', key: 'yt' }], ordered.map(([k, list]) => ({ cat: titleCase(k), n: list.length, ig: compact(sum(list, 'instagram') || null), yt: compact(sum(list, 'youtube') || null) }))));
+    content.push(muted(agency.kit_note || 'Prices are per deliverable, exclude GST, and depend on usage rights, exclusivity and timelines. Every metric shows its source and date; unavailable figures are marked, never estimated. Previous average views use the latest organic (non-boosted) posts where recorded.'));
+  }
+  if (c.sections('comparison')) content.push(h2(category ? 'At a glance' : 'Roster at a glance'), table([
+    { label: 'Creator', key: 'name' },
+    ...(category ? [] : [{ label: 'Category', key: 'cat' }]),
+    { label: 'Instagram', key: 'ig', link: 'ig_url' }, { label: 'IG avg views', key: 'igv' },
+    { label: 'YouTube', key: 'yt', link: 'yt_url' }, { label: 'YT avg views', key: 'ytv' },
+    { label: 'Engagement', key: 'er' },
+    ...(withPrices ? [{ label: 'From', key: 'starting_price', money: true }] : []),
+  ], ordered.flatMap(([key, list]) => list.map((r) => {
+    const ig = plat(r, 'instagram');
+    const yt = plat(r, 'youtube');
+    return { ...r, cat: titleCase(key), ig: ig ? compact(ig.followers) : '—', ig_url: ig?.url, igv: ig ? compact(ig.avg_views) : '—', yt: yt ? compact(yt.followers) : '—', yt_url: yt?.url, ytv: yt ? compact(yt.avg_views) : '—', er: ig?.engagement_rate != null ? `${ig.engagement_rate}%` : '—' };
+  })), { fontSize: 8 }));
+  // Profiles flow page to page; a category heading always stays with its first creator.
+  if (c.sections('profiles')) ordered.forEach(([key, list]) => {
+    const [first, ...rest] = list.map(card);
+    content.push({ stack: [{ text: `${titleCase(key)} · ${list.length} creator${list.length === 1 ? '' : 's'}`, style: 'h2' }, first], unbreakable: true }, ...rest);
+  });
+  const contact = [['Agency', agency.name], ['Email', agency.email], ['Phone', agency.phone], ['Website', agency.website]].filter(([, v]) => v) as [string, string][];
+  if (contact.length) content.push(h2('Work with us'), kv(contact));
+
+  const prices = rows.map((r) => r.starting_price).filter((x): x is number => x != null);
+  const igTotal = sum(rows, 'instagram');
+  const ytTotal = sum(rows, 'youtube');
+  return {
+    title: category ? `Media kit — ${titleCase(category)}` : 'Creator media kit',
+    subtitle: category ? `${rows.length} creator${rows.length === 1 ? '' : 's'} in ${titleCase(category)}` : `${rows.length} creators across ${ordered.length} categor${ordered.length === 1 ? 'y' : 'ies'}`,
+    recipient: c.params.recipient || 'brand partners',
+    asOf: `Figures as of ${formatDate(c.today)}`,
+    summary: [
+      `${rows.length} creator${rows.length === 1 ? '' : 's'}${category ? '' : ` in ${ordered.map(([k]) => titleCase(k)).join(', ')}`}.`,
+      [igTotal ? `${compact(igTotal)} combined Instagram followers` : null, ytTotal ? `${compact(ytTotal)} combined YouTube subscribers` : null].filter(Boolean).join(' · ') || 'Follower counts not recorded.',
+      !withPrices ? 'Commercials on request.' : prices.length ? `Commercials from ${money(Math.min(...prices))} per deliverable (excl. GST).` : 'No commercials recorded yet — on request.',
+    ],
+    content,
+    csv: [{ name: 'Media kit', columns: [{ label: 'Creator', key: 'name' }, { label: 'Handle', key: 'handle' }, { label: 'Categories', key: 'cats' }, { label: 'City', key: 'city' }, { label: 'Instagram', key: 'ig_url' }, { label: 'IG followers', key: 'ig_f' }, { label: 'IG prev. avg views', key: 'ig_v' }, { label: 'YouTube', key: 'yt_url' }, { label: 'YT subscribers', key: 'yt_f' }, { label: 'YT prev. avg views', key: 'yt_v' }, ...(withPrices ? [{ label: 'Starting price', key: 'starting_price', money: true }] : [])],
+      rows: rows.map((r) => ({ ...r, cats: r.niches.join(', '), ig_url: plat(r, 'instagram')?.url, ig_f: plat(r, 'instagram')?.followers, ig_v: plat(r, 'instagram')?.avg_views, yt_url: plat(r, 'youtube')?.url, yt_f: plat(r, 'youtube')?.followers, yt_v: plat(r, 'youtube')?.avg_views })) }],
+    data: { creators: rows.length, category, categories: ordered.map(([k, l]) => ({ category: k, creators: l.map((r) => r.id) })), commercials: withPrices, kit: rows.map((r) => ({ id: r.id, platforms: r.platforms, commercials: r.commercials })) },
+  };
+}
 
 function payeeReport(c: Ctx, kind: 'influencer' | 'editor'): Built {
   const id = Number(c.params[kind === 'influencer' ? 'influencer_id' : 'editor_id']);
@@ -618,7 +699,7 @@ export async function produce(db: Db, dataDir: string, runId: number): Promise<v
     const { from, to } = periodOf(params, t);
     const def = REPORTS[r.report_type];
     const selected: string[] | null = Array.isArray(params.sections) && params.sections.length ? params.sections : null;
-    const ctx: Ctx = { db, params, audience: r.audience, today: t, user, from, to, sections: (k) => !selected || selected.includes(k) };
+    const ctx: Ctx = { db, params, audience: r.audience, today: t, user, from, to, sections: (k) => !selected || selected.includes(k), dataDir };
     const built = def.build(ctx);
     // Imported ChatGPT commentary goes last, in its own labelled box, apart from website-calculated figures.
     const ref = def.ai?.ref?.(ctx) ?? null;
@@ -654,6 +735,7 @@ export function requestReport(db: Db, user: User | null, v: { report_type: strin
   if (user && !canGenerate(user, v.report_type, audience)) throw new HttpError(403, 'You cannot generate this report');
   const params = v.params ?? {};
   if (params.analysis_id && def.ai) analysisFor(db, { params, audience, user, ...periodOf(params, today(db)) }, def.ai, null);
+  if (v.report_type === 'roster' && params.category !== undefined && (typeof params.category !== 'string' || params.category.length > 60)) throw new HttpError(400, 'Invalid category');
   const same = JSON.stringify(params);
   const version = all(db, 'SELECT params FROM report_runs WHERE report_type = ? AND audience = ?', v.report_type, audience).filter((x) => x.params === same).length + 1;
   const id = insert(db, 'report_runs', { report_type: v.report_type, audience, params, status: 'queued', progress: 0, attempts: 0, version, template_id: v.template_id ?? null, title: def.label, created_by: user?.id ?? null });

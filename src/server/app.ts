@@ -601,6 +601,11 @@ export function createApp(db: Db, opts: AppOptions) {
     if (key === 'recognition') {
       if (!['invoice', 'cash', 'completion'].includes(value?.basis) || !['capitalise', 'expense'].includes(value?.assets) || typeof value?.creatorPassThrough !== 'boolean') throw new HttpError(400, 'Invalid recognition rules');
     }
+    if (key === 'agency') {
+      const ok = value && typeof value === 'object' && !Array.isArray(value) && Object.entries(value).every(([k, x]) => ['name', 'email', 'phone', 'website', 'kit_note'].includes(k) && (x === null || (typeof x === 'string' && x.length <= (k === 'kit_note' ? 1000 : 200))));
+      if (!ok) throw new HttpError(400, 'Invalid agency details');
+      if (value.website && !/^https?:\/\//.test(value.website)) throw new HttpError(400, 'Website must start with https://');
+    }
     if (key === 'timezone') {
       try {
         new Intl.DateTimeFormat('en', { timeZone: value });

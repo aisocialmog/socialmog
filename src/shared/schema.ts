@@ -170,7 +170,8 @@ export const ENTITIES: Entity[] = [
     fields: [
       f('name', 'text', { required: true, list: true }),
       f('handle', 'text', { list: true, hint: 'Primary handle, e.g. @ananya.eats' }),
-      f('photo_url', 'url', { label: 'Photo URL' }),
+      f('photo_url', 'url', { label: 'Photo URL', hint: 'Or upload a photo on the creator page (used in media kits)' }),
+      f('photo_file', 'text', { readonly: true, label: 'Uploaded photo' }),
       en('relationship', ['exclusive', 'non_exclusive', 'campaign_only', 'prospect', 'inactive', 'agency_owned'], { required: true, default: 'prospect', list: true, hint: 'agency_owned = a Socialmog account tracked for analytics' }),
       ref('manager_id', 'users', { label: 'Talent manager', list: true }),
       f('niches', 'tags', { list: true }),

@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
-import { ExternalLink, Users } from 'lucide-react';
+import { BookImage, ExternalLink, ImageUp, Users } from 'lucide-react';
 import { formatDate } from '../../shared/dates.ts';
 import { formatINR, formatNumberIN } from '../../shared/money.ts';
 import { can, ENTITY, fieldLabel, humanize, PLATFORMS, visibleFields } from '../../shared/schema.ts';
@@ -24,25 +24,143 @@ export function PlatformLinks({ platforms }: { platforms: Row[] | null }) {
   );
 }
 
+/** One channel: link, followers and where the numbers came from. */
+function Channel({ p }: { p: Row | undefined }) {
+  if (!p) return <span className="muted">—</span>;
+  return (
+    <span className="nowrap" title={`Followers: ${p.followers_basis ?? 'not recorded'}`}>
+      {p.url ? <a href={p.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>@{p.handle ?? humanize(p.platform)} <ExternalLink size={11} /></a> : `@${p.handle ?? '—'}`}
+      <div className="small muted">{p.followers != null ? `${formatNumberIN(p.followers, { compact: true })} ${p.platform === 'youtube' ? 'subscribers' : 'followers'}` : 'Followers not recorded'}</div>
+    </span>
+  );
+}
+const PLAT = (s: Row | undefined, p: string) => s?.platforms.find((x: Row) => x.platform === p);
+const VIEW_PLATFORMS: [string, string][] = [['instagram', 'IG'], ['youtube', 'YT']];
+
 export function Influencers() {
   const [shortlist, setShortlist] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [kit, setKit] = useState(false);
+  const stats = useApi<{ rows: Row[] }>('/api/influencers/stats');
+  const byId = useMemo(() => new Map((stats.data?.rows ?? []).map((r) => [r.id, r])), [stats.data]);
+  const s = (r: Row) => byId.get(r.id);
+  const canRates = useCan('rates');
   return (
     <div className="stack">
-      <PageHead title="Influencer roster" sub="Creators we manage, work with or are scouting" actions={<><AnalyseButton type="influencer_growth" /><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
+      <PageHead title="Influencer roster" sub="Creators we manage, work with or are scouting · hover a figure to see its source and date"
+        actions={<><AnalyseButton type="influencer_growth" /><button className="btn" onClick={() => setExporting(true)}>Shareable export</button><button className="btn" onClick={() => setKit(true)}><BookImage /> Media kit</button><button className="btn primary" onClick={() => setShortlist(true)}><Users /> Shortlist for a campaign</button></>} />
       <EntityTable entity="influencers" overrides={{
         name: { render: (r) => <span className="row nowrap-row"><Avatar r={r} /><span><strong>{r.name}</strong> <DemoTag row={r} /><div className="small muted">{r.handle}</div></span></span> },
-        platforms: { hidden: false, label: 'Platforms', render: (r) => <PlatformLinks platforms={r.platforms} />, value: (r) => Math.max(0, ...(r.platforms ?? []).map((p: Row) => p.followers ?? 0)) },
+        platforms: { hidden: true, label: 'All platforms', render: (r) => <PlatformLinks platforms={r.platforms} />, value: (r) => Math.max(0, ...(r.platforms ?? []).map((p: Row) => p.followers ?? 0)) },
+        niches: { label: 'Categories' },
         handle: { hidden: true },
-      }} />
+        manager_id: { hidden: true },
+        city: { hidden: true },
+        agreement_end: { hidden: true },
+      }} extra={[
+        { key: 'instagram', label: 'Instagram', render: (r) => <Channel p={PLAT(s(r), 'instagram')} />, value: (r) => PLAT(s(r), 'instagram')?.followers ?? null, csv: (r) => PLAT(s(r), 'instagram')?.url ?? '' },
+        { key: 'youtube', label: 'YouTube', render: (r) => <Channel p={PLAT(s(r), 'youtube')} />, value: (r) => PLAT(s(r), 'youtube')?.followers ?? null, csv: (r) => PLAT(s(r), 'youtube')?.url ?? '' },
+        {
+          key: 'avg_views', label: 'Prev. avg views', num: true,
+          value: (r) => Math.max(0, ...(s(r)?.platforms ?? []).map((p: Row) => p.avg_views ?? 0)) || null,
+          csv: (r) => VIEW_PLATFORMS.map(([k, l]) => (PLAT(s(r), k)?.avg_views != null ? `${l} ${PLAT(s(r), k).avg_views}` : null)).filter(Boolean).join('; '),
+          render: (r) => {
+            const lines = VIEW_PLATFORMS.map(([k, l]) => [l, PLAT(s(r), k)] as const).filter(([, p]) => p);
+            return lines.length ? <span className="nowrap">{lines.map(([l, p]) => <div key={l} title={p.views_basis ?? 'Not recorded'}>{l} {p.avg_views != null ? formatNumberIN(p.avg_views, { compact: true }) : <span className="muted">—</span>}</div>)}</span> : <span className="muted">—</span>;
+          },
+        },
+        { key: 'engagement', label: 'Engagement', num: true, value: (r) => PLAT(s(r), 'instagram')?.engagement_rate ?? null, render: (r) => { const p = PLAT(s(r), 'instagram'); return p?.engagement_rate != null ? <span title={p.engagement_basis}>{p.engagement_rate}%</span> : <span className="muted">—</span>; } },
+        ...(canRates ? [{
+          key: 'commercials', label: 'Commercials', num: true, value: (r: Row) => s(r)?.starting_price ?? null,
+          csv: (r: Row) => (s(r)?.commercials ?? []).map((c: Row) => `${humanize(c.deliverable)} ${formatINR(c.price)}`).join('; '),
+          render: (r: Row) => (s(r)?.commercials?.length ? <span className="nowrap small">{s(r)!.commercials.map((c: Row, i: number) => <div key={i}>{humanize(c.deliverable)} <Money p={c.price} /></div>)}</span> : <span className="muted small">On request</span>),
+        }] : []),
+      ]} />
       <Modal open={shortlist} onClose={() => setShortlist(false)} title="Shortlist creators" size="drawer">{shortlist && <Shortlist />}</Modal>
       <Modal open={exporting} onClose={() => setExporting(false)} title="Shareable roster export">{exporting && <RosterExport />}</Modal>
+      <Modal open={kit} onClose={() => setKit(false)} title="Media kit for brands">{kit && <MediaKitForm stats={stats.data?.rows ?? []} />}</Modal>
     </div>
   );
 }
 
+function PhotoButton({ r, onDone }: { r: Row; onDone: () => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button className="btn" onClick={() => ref.current?.click()}><ImageUp /> {r.photo_file ? 'Change photo' : 'Upload photo'}</button>
+      <input ref={ref} type="file" accept="image/png,image/jpeg" hidden onChange={async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = '';
+        if (!f) return;
+        if (f.size > 3_000_000) return toast('Photo must be under 3 MB', 'error');
+        if (await attempt(() => api(`/api/influencers/${r.id}/photo`, { raw: f, headers: { 'content-type': f.type || 'application/octet-stream' } }), 'Photo updated')) onDone();
+      }} />
+      {r.photo_file && <button className="btn ghost" onClick={async () => { if (await attempt(() => api(`/api/influencers/${r.id}/photo`, { method: 'DELETE' }), 'Photo removed')) onDone(); }}>Remove photo</button>}
+    </>
+  );
+}
+
 function Avatar({ r, size = 34 }: { r: Row; size?: number }) {
-  return <span className="avatar" style={{ width: size, height: size }}>{r.photo_url ? <img src={r.photo_url} alt="" /> : (r.name ?? '?').slice(0, 1)}</span>;
+  const src = r.photo_file ? `/api/influencers/${r.id}/photo?v=${encodeURIComponent(r.updated_at ?? '')}` : r.photo_url;
+  return <span className="avatar" style={{ width: size, height: size }}>{src ? <img src={src} alt="" /> : (r.name ?? '?').slice(0, 1)}</span>;
+}
+
+/** Whole-roster or category media kit PDF (brand-facing: no commissions, negotiated rates or internal notes). */
+export function MediaKitForm({ stats, ids }: { stats: Row[]; ids?: number[] }) {
+  const nav = useNavigate();
+  const brands = useOptions('brands');
+  const canRates = useCan('rates');
+  const active = stats.filter((r) => !['inactive', 'prospect', 'agency_owned'].includes(r.relationship));
+  const counts = new Map<string, number>();
+  for (const r of active) for (const n of new Set<string>(r.niches.map((x: string) => x.toLowerCase()))) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const categories = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const [scope, setScope] = useState(ids ? 'selected' : 'whole');
+  const [category, setCategory] = useState(categories[0]?.[0] ?? '');
+  const [recipient, setRecipient] = useState('');
+  const [parts, setParts] = useState({ commercials: canRates, collaborations: true, top_content: true });
+  const [busy, setBusy] = useState(false);
+  const request = (params: Row) => api('/api/reports', { body: { report_type: 'roster', audience: 'external', params: { ...params, recipient: recipient.trim() || undefined, sections: ['overview', 'comparison', 'profiles', ...Object.entries(parts).filter(([, on]) => on).map(([k]) => k)] } } });
+  const go = async () => {
+    setBusy(true);
+    try {
+      if (scope === 'each') {
+        for (const [c] of categories) await request({ category: c });
+        toast(`${categories.length} category kits are being generated`);
+        nav('/reports');
+      } else {
+        const r = await request(scope === 'category' ? { category } : scope === 'selected' ? { influencer_ids: ids } : {});
+        nav(`/reports/${r.id}`);
+      }
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="stack">
+      <div className="stack tight">
+        {ids && <label className="check"><input type="radio" checked={scope === 'selected'} onChange={() => setScope('selected')} /> This creator only</label>}
+        <label className="check"><input type="radio" checked={scope === 'whole'} onChange={() => setScope('whole')} /> Whole roster, grouped by category ({active.length} active creators)</label>
+        <label className="check"><input type="radio" checked={scope === 'category'} onChange={() => setScope('category')} /> One category</label>
+        {scope === 'category' && (
+          <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map(([c, n]) => <option key={c} value={c}>{humanize(c)} ({n})</option>)}</select>
+        )}
+        <label className="check"><input type="radio" checked={scope === 'each'} onChange={() => setScope('each')} /> A separate kit for every category ({categories.length} PDFs)</label>
+      </div>
+      <label className="field"><span>Prepared for (brand, optional)</span>
+        <input className="input" list="kit-brands" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="e.g. Glow Co" />
+        <datalist id="kit-brands">{brands.map((b) => <option key={b.id} value={b.label} />)}</datalist>
+      </label>
+      <div className="row small">
+        <label className="check"><input type="checkbox" checked={parts.commercials} disabled={!canRates} onChange={(e) => setParts({ ...parts, commercials: e.target.checked })} /> Commercials (brand prices)</label>
+        <label className="check"><input type="checkbox" checked={parts.collaborations} onChange={(e) => setParts({ ...parts, collaborations: e.target.checked })} /> Brands worked with</label>
+        <label className="check"><input type="checkbox" checked={parts.top_content} onChange={(e) => setParts({ ...parts, top_content: e.target.checked })} /> Top content links</label>
+      </div>
+      <div className="alert info small">Each creator gets their photo, Instagram and YouTube links, followers, previous average views, engagement, audience and commercials, each with its source and date. Prices use the rate card's <em>brand price</em> (or the rate card if none is set). Negotiated rates, commissions, contact details and internal notes are never included.</div>
+      <div className="row"><span className="grow" /><button className="btn primary" disabled={busy || (scope === 'category' && !category)} onClick={go}><BookImage /> Generate media kit</button></div>
+    </div>
+  );
 }
 
 function RosterExport() {
@@ -61,7 +179,6 @@ function RosterExport() {
         ))}
       </div>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <Link className="btn" to="/reports?type=roster">Branded PDF roster</Link>
         <a className="btn primary" href={`/api/e/influencers/export.csv?fields=${picked.join(',')}`}>Download CSV</a>
       </div>
     </div>
@@ -139,6 +256,8 @@ export function InfluencerPage() {
   const q = useApi<Row>(`/api/influencers/${id}/overview`);
   const [tab, setTab] = useState('profile');
   const [editing, setEditing] = useState(false);
+  const [kit, setKit] = useState(false);
+  const kitStats = useApi<{ rows: Row[] }>(kit ? '/api/influencers/stats' : null);
   const me = useMe();
   const nav = useNavigate();
   const canEdit = can(me.user.role, 'talent');
@@ -161,6 +280,8 @@ export function InfluencerPage() {
               <div className="row">
                 <Link className="btn" to={`/analytics/influencer/${r.id}`}>Weekly analysis</Link>
                 <AnalyseButton type="influencer_growth" ids={[r.id]} />
+                <button className="btn" onClick={() => setKit(true)}><BookImage /> Media kit</button>
+                {canEdit && <PhotoButton r={r} onDone={q.reload} />}
                 {canEdit && <button className="btn" onClick={() => setEditing(true)}>Edit</button>}
                 <ArchiveButton entity="influencers" row={r} onDone={() => nav('/influencers')} />
               </div>
@@ -186,7 +307,7 @@ export function InfluencerPage() {
             )}
             {tab === 'platforms' && (
               <div className="stack">
-                <Card title="Platforms" hint="Each figure shows where it came from and when" flush>
+                <Card title="Platforms" hint="Each figure shows where it came from and when. The roster and media kits use the latest organic posts for average views and engagement once 3 or more are recorded, and the newest weekly snapshot for followers." flush>
                   <table className="table">
                     <thead><tr><th>Platform</th><th>Handle</th><th className="num">Followers</th><th className="num">Avg views</th><th className="num">Median views</th><th className="num">Engagement</th><th>Source</th><th>As of</th></tr></thead>
                     <tbody>{(r.platforms ?? []).map((p: Row, i: number) => (
@@ -200,8 +321,8 @@ export function InfluencerPage() {
                 {r.rate_card !== undefined && (
                   <Card title="Rate card & commission" flush>
                     <table className="table">
-                      <thead><tr><th>Deliverable</th><th>Platform</th><th className="num">Rate card</th><th className="num">Negotiated</th><th>Notes</th></tr></thead>
-                      <tbody>{(r.rate_card ?? []).map((c: Row, i: number) => <tr key={i}><td>{humanize(c.deliverable ?? '')}</td><td>{humanize(c.platform ?? '')}</td><td className="num"><Money p={c.rate} /></td><td className="num"><Money p={c.negotiated_rate} /></td><td className="small">{c.notes}</td></tr>)}</tbody>
+                      <thead><tr><th>Deliverable</th><th>Platform</th><th className="num">Rate card</th><th className="num" title="Shown to brands in media kits">Brand price</th><th className="num">Negotiated</th><th>Notes</th></tr></thead>
+                      <tbody>{(r.rate_card ?? []).map((c: Row, i: number) => <tr key={i}><td>{humanize(c.deliverable ?? '')}</td><td>{humanize(c.platform ?? '')}</td><td className="num"><Money p={c.rate} /></td><td className="num">{c.brand_rate != null ? <Money p={c.brand_rate} /> : <span className="muted small">= rate card</span>}</td><td className="num"><Money p={c.negotiated_rate} /></td><td className="small">{c.notes}</td></tr>)}</tbody>
                     </table>
                     <div style={{ padding: 12 }} className="small">Commission: {r.commission_type === 'percentage' ? `${(r.commission_rate ?? 0) / 100}%` : r.commission_type === 'fixed' ? formatINR(r.commission_fixed) : 'None'}{r.commission_notes ? ` · ${r.commission_notes}` : ''}</div>
                   </Card>
@@ -236,6 +357,7 @@ export function InfluencerPage() {
             {tab === 'chatgpt' && <ImportedAnalyses refKey={`influencers:${r.id}`} />}
             {tab === 'activity' && <Card><Activity entity="influencers" id={r.id} /></Card>}
             <Modal open={editing} onClose={() => setEditing(false)} title="Edit influencer"><EntityForm entity="influencers" record={r} onSaved={() => (setEditing(false), q.reload())} /></Modal>
+            <Modal open={kit} onClose={() => setKit(false)} title={`Media kit — ${r.name}`}>{kit && (kitStats.data ? <MediaKitForm stats={kitStats.data.rows} ids={[r.id]} /> : <span className="muted">Loading…</span>)}</Modal>
           </div>
         );
       }}

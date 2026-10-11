@@ -51,6 +51,11 @@ export function ReportForm({ initial, onCreated, saveAsTemplate }: { initial?: R
   useEffect(() => {
     if (def && !def[v.audience]) setV((x) => ({ ...x, audience: def.internal ? 'internal' : 'external' }));
   }, [def?.key]);
+  useEffect(() => {
+    // Roles that cannot generate the default report start on the first one they can.
+    const allowed = types.data?.types.filter((t) => t.internal || t.external) ?? [];
+    if (allowed.length && !allowed.some((t) => t.key === v.report_type)) setV((x) => ({ ...x, report_type: allowed[0].key, params: {} }));
+  }, [types.data]);
   const params = { ...v.params, from, to };
   return (
     <div className="stack">
@@ -65,6 +70,7 @@ export function ReportForm({ initial, onCreated, saveAsTemplate }: { initial?: R
         {v.report_type === 'creator_statement' && <label className="field"><span>Creator</span><select className="input" value={v.params.influencer_id ?? ''} onChange={(e) => setParam('influencer_id', Number(e.target.value))}><option value="">Choose…</option>{influencers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
         {v.report_type === 'brand_statement' && <label className="field"><span>Brand</span><select className="input" value={v.params.brand_id ?? ''} onChange={(e) => setParam('brand_id', Number(e.target.value))}><option value="">Choose…</option>{brands.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
         {v.report_type === 'editor_summary' && <label className="field"><span>Editor</span><select className="input" value={v.params.editor_id ?? ''} onChange={(e) => setParam('editor_id', Number(e.target.value))}><option value="">Choose…</option>{editors.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
+        {v.report_type === 'roster' && <label className="field"><span>Category (optional)</span><input className="input" value={v.params.category ?? ''} placeholder="e.g. beauty — leave empty for the whole roster" onChange={(e) => setParam('category', e.target.value || undefined)} /></label>}
         {v.report_type === 'roster' && <label className="field full"><span>Creators (leave empty for all active)</span><select className="input" multiple style={{ height: 120 }} value={(v.params.influencer_ids ?? []).map(String)} onChange={(e) => setParam('influencer_ids', [...e.target.selectedOptions].map((o) => Number(o.value)))}>{influencers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</select></label>}
       </div>
       {def?.ai_types?.length > 0 && (!v.params.sections || v.params.sections.includes('chatgpt')) && (

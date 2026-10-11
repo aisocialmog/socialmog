@@ -36,7 +36,7 @@ npm test        # node:test — finance engine, permissions over HTTP, forecast 
 npm run typecheck
 ```
 
-Covered (29 tests): Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction, and the ChatGPT workflow (package contents and exclusions, schema errors, unresolved IDs, metric conflicts, provenance, financial guards, stale exports, duplicate results, all-or-nothing apply, undo, permissions, weekly preparation, labelled PDF commentary).
+Covered (32 tests): Indian formatting and exact splits, partial payments, over-payment and duplicate-payment guards (idempotency key, bank reference, same-day duplicate), reversals, TDS on receipts and payouts, transfers excluded from earnings, no double counting of campaign costs, earmark history, bank CSV import de-duplication, same-day forecast ordering, the founder's camera example with a delayed commission, role/field redaction, editor isolation, external users blocked from internal APIs, CSRF header, login lockout, weekly comparisons with unavailable metrics, once-per-week scheduled analysis, external report redaction, and the ChatGPT workflow (package contents and exclusions, schema errors, unresolved IDs, metric conflicts, provenance, financial guards, stale exports, duplicate results, all-or-nothing apply, undo, permissions, weekly preparation, labelled PDF commentary), roster figures (average-views basis and fallbacks, paid posts excluded, brand prices), media kits (whole vs category grouping, brand-safe content) and photo uploads (byte checks, permissions).
 
 ## How the money works
 
@@ -65,6 +65,15 @@ Nothing is ever sent outside the app automatically: invites and reports are copi
 - **Manual ChatGPT analysis** — see below. No API key; nothing is sent to OpenAI by the website.
 - **Not connected:** email/WhatsApp sending, bank feeds, YouTube API, payment gateways. Manual workflows: copy links or use the mail button; import bank statements as CSV (duplicates skipped); enter YouTube/other platforms weekly by hand or CSV; record payments manually with a reference.
 
+## Roster & brand media kits
+
+The roster shows each creator's photo, categories, Instagram and YouTube links with followers/subscribers, **previous average views**, engagement and commercials. Hover any figure for its source and date.
+
+- **Previous average views** = mean of the latest 10 organic (non-boosted) posts recorded for that channel, once at least 3 exist; otherwise the profile figure with its source and date. Engagement uses the same posts' reach. Followers come from the newest weekly snapshot if it is more recent than the profile entry. Nothing is estimated: missing figures show as unavailable.
+- **Commercials** use each rate-card line's *brand price* (or the rate card if none is set). Negotiated rates and commissions stay internal.
+- **Photos**: upload a PNG/JPEG on the creator page (talent managers and founders); it is used in the roster and kits.
+- **Media kit** (roster page or creator page): the whole roster grouped by category, one category, a separate kit for every category, or a single creator. Each kit has an at-a-glance table and a profile per creator (photo, links, followers, previous average views, median views, engagement, audience, commercials, brands worked with, top content), with the source of every figure. Kits never include commissions, negotiated rates, identity or contact details, conflicts or internal notes. Agency contact details and the note printed on kits are set in **Settings → Agency & media kit**.
+
 ## Manual ChatGPT analysis
 
 Use your own ChatGPT subscription without an API integration. **Analyse with ChatGPT** appears on the overview, roster, creator, campaign, brand, deal, finance, editor, content-task and analytics pages, and under **ChatGPT analysis** in the sidebar.
@@ -84,7 +93,7 @@ The in-process scheduler (every 30s) runs: the weekly ChatGPT package, weekly an
 
 ## Reports
 
-**Reports** generates branded, searchable PDFs (with CSV) in the background: finance, founder, campaign, influencer growth, brand statement, creator statement, editor payment summary, editor workload, expenses, asset register, deal pipeline, shareable roster. Campaign and influencer growth reports can cover several records (one section each). Imported ChatGPT commentary can be added as its own labelled section. Choose period, records and sections; internal and external templates are separate (external hides commissions, margins, private notes). Each run is archived with a data snapshot and version, and permission is re-checked on download.
+**Reports** generates branded, searchable PDFs (with CSV) in the background: finance, founder, campaign, influencer growth, brand statement, creator statement, editor payment summary, editor workload, expenses, asset register, deal pipeline, brand media kit. Campaign and influencer growth reports can cover several records (one section each). Imported ChatGPT commentary can be added as its own labelled section. Choose period, records and sections; internal and external templates are separate (external hides commissions, margins, private notes). Each run is archived with a data snapshot and version, and permission is re-checked on download.
 
 ## Code map
 
