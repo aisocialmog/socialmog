@@ -16,7 +16,7 @@ export function PlatformLinks({ platforms }: { platforms: Row[] | null }) {
   return (
     <span className="row" style={{ gap: 6 }}>
       {platforms.map((p, i) => (
-        <a key={i} href={p.url} target="_blank" rel="noreferrer" className="badge" onClick={(e) => e.stopPropagation()} title={`${p.handle ?? ''} · source: ${p.source ?? 'unknown'}${p.updated_at ? `, as of ${formatDate(p.updated_at)}` : ''}`}>
+        <a key={i} href={/^https?:\/\//i.test(p.url ?? '') ? p.url : undefined} target="_blank" rel="noreferrer" className="badge" onClick={(e) => e.stopPropagation()} title={`${p.handle ?? ''} · source: ${p.source ?? 'unknown'}${p.updated_at ? `, as of ${formatDate(p.updated_at)}` : ''}`}>
           {humanize(p.platform)} {p.followers != null ? formatNumberIN(p.followers, { compact: true }) : '—'} <ExternalLink size={11} />
         </a>
       ))}
@@ -36,6 +36,7 @@ function Channel({ p }: { p: Row | undefined }) {
 }
 const PLAT = (s: Row | undefined, p: string) => s?.platforms.find((x: Row) => x.platform === p);
 const VIEW_PLATFORMS: [string, string][] = [['instagram', 'IG'], ['youtube', 'YT']];
+const deliverable = (k: string | null) => (k === 'youtube_video' ? 'YouTube video' : humanize(k ?? 'deliverable'));
 
 export function Influencers() {
   const [shortlist, setShortlist] = useState(false);
@@ -62,25 +63,36 @@ export function Influencers() {
         { key: 'youtube', label: 'YouTube', render: (r) => <Channel p={PLAT(s(r), 'youtube')} />, value: (r) => PLAT(s(r), 'youtube')?.followers ?? null, csv: (r) => PLAT(s(r), 'youtube')?.url ?? '' },
         {
           key: 'avg_views', label: 'Prev. avg views', num: true,
-          value: (r) => Math.max(0, ...(s(r)?.platforms ?? []).map((p: Row) => p.avg_views ?? 0)) || null,
+          value: (r) => Math.max(0, ...VIEW_PLATFORMS.map(([k]) => PLAT(s(r), k)?.avg_views ?? 0)) || null,
           csv: (r) => VIEW_PLATFORMS.map(([k, l]) => (PLAT(s(r), k)?.avg_views != null ? `${l} ${PLAT(s(r), k).avg_views}` : null)).filter(Boolean).join('; '),
           render: (r) => {
             const lines = VIEW_PLATFORMS.map(([k, l]) => [l, PLAT(s(r), k)] as const).filter(([, p]) => p);
             return lines.length ? <span className="nowrap">{lines.map(([l, p]) => <div key={l} title={p.views_basis ?? 'Not recorded'}>{l} {p.avg_views != null ? formatNumberIN(p.avg_views, { compact: true }) : <span className="muted">—</span>}</div>)}</span> : <span className="muted">—</span>;
           },
         },
-        { key: 'engagement', label: 'Engagement', num: true, value: (r) => PLAT(s(r), 'instagram')?.engagement_rate ?? null, render: (r) => { const p = PLAT(s(r), 'instagram'); return p?.engagement_rate != null ? <span title={p.engagement_basis}>{p.engagement_rate}%</span> : <span className="muted">—</span>; } },
+        { key: 'engagement', label: 'IG engagement', num: true, value: (r) => PLAT(s(r), 'instagram')?.engagement_rate ?? null, render: (r) => { const p = PLAT(s(r), 'instagram'); return p?.engagement_rate != null ? <span title={p.engagement_basis}>{p.engagement_rate}%</span> : <span className="muted">—</span>; } },
         ...(canRates ? [{
           key: 'commercials', label: 'Commercials', num: true, value: (r: Row) => s(r)?.starting_price ?? null,
-          csv: (r: Row) => (s(r)?.commercials ?? []).map((c: Row) => `${humanize(c.deliverable)} ${formatINR(c.price)}`).join('; '),
-          render: (r: Row) => (s(r)?.commercials?.length ? <span className="nowrap small">{s(r)!.commercials.map((c: Row, i: number) => <div key={i}>{humanize(c.deliverable)} <Money p={c.price} /></div>)}</span> : <span className="muted small">On request</span>),
+          csv: (r: Row) => (s(r)?.commercials ?? []).map((c: Row) => `${deliverable(c.deliverable)} ${formatINR(c.price)}`).join('; '),
+          render: (r: Row) => (s(r)?.commercials?.length ? <span className="nowrap small">{s(r)!.commercials.map((c: Row, i: number) => <div key={i}>{deliverable(c.deliverable)} <Money p={c.price} /></div>)}</span> : <span className="muted small">On request</span>),
         }] : []),
       ]} />
       <Modal open={shortlist} onClose={() => setShortlist(false)} title="Shortlist creators" size="drawer">{shortlist && <Shortlist />}</Modal>
       <Modal open={exporting} onClose={() => setExporting(false)} title="Shareable roster export">{exporting && <RosterExport />}</Modal>
-      <Modal open={kit} onClose={() => setKit(false)} title="Media kit for brands">{kit && <MediaKitForm stats={stats.data?.rows ?? []} />}</Modal>
+      <Modal open={kit} onClose={() => setKit(false)} title="Media kit for brands">{kit && <Async q={stats}>{(d) => <MediaKitForm stats={d.rows} />}</Async>}</Modal>
     </div>
   );
+}
+
+/** Square, at most 400px JPEG made in the browser: small kits, and re-encoding drops EXIF/GPS (the server strips it too). */
+async function toAvatar(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file).catch(() => { throw new Error('Could not read that image — use a JPEG or PNG'); });
+  const side = Math.min(bmp.width, bmp.height);
+  const out = Math.min(400, side);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = out;
+  canvas.getContext('2d')!.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, out, out);
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not process that image'))), 'image/jpeg', 0.85));
 }
 
 function PhotoButton({ r, onDone }: { r: Row; onDone: () => void }) {
@@ -88,12 +100,11 @@ function PhotoButton({ r, onDone }: { r: Row; onDone: () => void }) {
   return (
     <>
       <button className="btn" onClick={() => ref.current?.click()}><ImageUp /> {r.photo_file ? 'Change photo' : 'Upload photo'}</button>
-      <input ref={ref} type="file" accept="image/png,image/jpeg" hidden onChange={async (e) => {
+      <input ref={ref} type="file" accept="image/*" hidden onChange={async (e) => {
         const f = e.target.files?.[0];
         e.target.value = '';
         if (!f) return;
-        if (f.size > 3_000_000) return toast('Photo must be under 3 MB', 'error');
-        if (await attempt(() => api(`/api/influencers/${r.id}/photo`, { raw: f, headers: { 'content-type': f.type || 'application/octet-stream' } }), 'Photo updated')) onDone();
+        if (await attempt(async () => api(`/api/influencers/${r.id}/photo`, { raw: await toAvatar(f), headers: { 'content-type': 'image/jpeg' } }), 'Photo updated')) onDone();
       }} />
       {r.photo_file && <button className="btn ghost" onClick={async () => { if (await attempt(() => api(`/api/influencers/${r.id}/photo`, { method: 'DELETE' }), 'Photo removed')) onDone(); }}>Remove photo</button>}
     </>
@@ -113,7 +124,7 @@ export function MediaKitForm({ stats, ids }: { stats: Row[]; ids?: number[] }) {
   const active = stats.filter((r) => !['inactive', 'prospect', 'agency_owned'].includes(r.relationship));
   const counts = new Map<string, number>();
   for (const r of active) for (const n of new Set<string>(r.niches.map((x: string) => x.toLowerCase()))) counts.set(n, (counts.get(n) ?? 0) + 1);
-  const categories = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const categories = [...counts.entries()].filter(([c]) => c.length <= 200).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const [scope, setScope] = useState(ids ? 'selected' : 'whole');
   const [category, setCategory] = useState(categories[0]?.[0] ?? '');
   const [recipient, setRecipient] = useState('');
@@ -124,9 +135,12 @@ export function MediaKitForm({ stats, ids }: { stats: Row[]; ids?: number[] }) {
     setBusy(true);
     try {
       if (scope === 'each') {
-        for (const [c] of categories) await request({ category: c });
-        toast(`${categories.length} category kits are being generated`);
-        nav('/reports');
+        // One kit per category; a failure on one does not stop the rest, and the summary says what happened.
+        const failed: string[] = [];
+        for (const [c] of categories) await request({ category: c }).catch(() => failed.push(c));
+        const ok = categories.length - failed.length;
+        toast(failed.length ? `${ok} of ${categories.length} kits queued; could not start: ${failed.join(', ')}` : `${ok} category kits are being generated`, failed.length ? 'error' : 'info');
+        if (ok) nav('/reports');
       } else {
         const r = await request(scope === 'category' ? { category } : scope === 'selected' ? { influencer_ids: ids } : {});
         nav(`/reports/${r.id}`);
@@ -146,7 +160,7 @@ export function MediaKitForm({ stats, ids }: { stats: Row[]; ids?: number[] }) {
         {scope === 'category' && (
           <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map(([c, n]) => <option key={c} value={c}>{humanize(c)} ({n})</option>)}</select>
         )}
-        <label className="check"><input type="radio" checked={scope === 'each'} onChange={() => setScope('each')} /> A separate kit for every category ({categories.length} PDFs)</label>
+        <label className="check"><input type="radio" checked={scope === 'each'} disabled={!categories.length} onChange={() => setScope('each')} /> A separate kit for every category ({categories.length} PDFs)</label>
       </div>
       <label className="field"><span>Prepared for (brand, optional)</span>
         <input className="input" list="kit-brands" value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="e.g. Glow Co" />
@@ -158,7 +172,7 @@ export function MediaKitForm({ stats, ids }: { stats: Row[]; ids?: number[] }) {
         <label className="check"><input type="checkbox" checked={parts.top_content} onChange={(e) => setParts({ ...parts, top_content: e.target.checked })} /> Top content links</label>
       </div>
       <div className="alert info small">Each creator gets their photo, Instagram and YouTube links, followers, previous average views, engagement, audience and commercials, each with its source and date. Prices use the rate card's <em>brand price</em> (or the rate card if none is set). Negotiated rates, commissions, contact details and internal notes are never included.</div>
-      <div className="row"><span className="grow" /><button className="btn primary" disabled={busy || (scope === 'category' && !category)} onClick={go}><BookImage /> Generate media kit</button></div>
+      <div className="row"><span className="grow" /><button className="btn primary" disabled={busy || (scope === 'category' && !category) || (scope !== 'selected' && !active.length)} onClick={go}><BookImage /> Generate media kit</button></div>
     </div>
   );
 }

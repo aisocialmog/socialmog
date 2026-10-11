@@ -185,6 +185,7 @@ function Agency() {
   const s = useApi<Row>('/api/settings');
   const [v, setV] = useState<Row | null>(null);
   const cur: Row = v ?? s.data?.agency ?? {};
+  if (!s.data) return <Async q={s}>{() => null}</Async>; // never edit (and overwrite) details that have not loaded
   const field = (k: string, label: string, type = 'text') => <label className="field"><span>{label}</span><input className="input" type={type} value={cur[k] ?? ''} onChange={(e) => setV({ ...cur, [k]: e.target.value || null })} /></label>;
   return (
     <div className="stack">

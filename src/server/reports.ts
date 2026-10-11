@@ -5,7 +5,7 @@
  */
 import type { Express, Request } from 'express';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { addDays, addMonths, financialYearStart, formatDate, formatDateTime, formatPeriod, isIsoDate, monthStart, partsInTz, weekStart } from '../shared/dates.ts';
 import { formatINR, formatNumberIN, paiseToRupeesString } from '../shared/money.ts';
@@ -16,7 +16,7 @@ import { all, audit, decode, get, getSetting, HttpError, insert, run, update, ty
 import { founders, notify, requireUser, toCsv } from './app.ts';
 import { accountBalances, ageing, campaignFinancials, cashflowByPeriod, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, today } from './finance.ts';
 import { forecast, SCENARIOS } from './forecast.ts';
-import { campaignHealth, creatorStats, dashboard, editorWorkload, influencerTrends, photoPath } from './domain.ts';
+import { campaignHealth, creatorStats, dashboard, editorWorkload, influencerTrends, PHOTO_MAX, photoPath, safePhoto } from './domain.ts';
 import { analyseWeek, enrich } from './analytics.ts';
 import { enqueue, onTick, registerJob, runDueJobs } from './jobs.ts';
 import { canUse, TYPES as AI_TYPES } from './chatgpt.ts';
@@ -566,8 +566,11 @@ function mediaKit(c: Ctx): Built {
     .filter((r) => !category || r.niches.some((n: string) => n.toLowerCase() === category))
     .sort((a, b) => a.name.localeCompare(b.name));
   if (!rows.length) throw new HttpError(400, category ? `No active creators in the "${category}" category` : 'No creators to include');
-  // Whole roster: each creator appears once, under their first (primary) category.
+  // Whole roster: each creator appears once, under their first (primary) category. Labels keep the case as entered (DIY, UGC).
   const groups = new Map<string, Row[]>();
+  const labels = new Map<string, string>([['other', 'Other']]);
+  for (const r of rows) for (const n of r.niches) if (!labels.has(String(n).toLowerCase())) labels.set(String(n).toLowerCase(), /[A-Z]/.test(n) ? n : titleCase(n));
+  const label = (k: string) => labels.get(k) ?? titleCase(k);
   for (const r of rows) {
     const key = category ?? (r.niches[0] ? String(r.niches[0]).toLowerCase() : 'other');
     groups.set(key, [...(groups.get(key) ?? []), r]);
@@ -576,21 +579,29 @@ function mediaKit(c: Ctx): Built {
   const agency = getSetting<Row>(c.db, 'agency', {});
   const plat = (r: Row, p: string) => r.platforms.find((x: Row) => x.platform === p);
   const sum = (list: Row[], p: string) => list.reduce((a, r) => a + (plat(r, p)?.followers ?? 0), 0);
+  // Small, cleaned photos only: an oversized or damaged file falls back to the initial so the kit always renders.
   const photos = new Map(all(c.db, `SELECT id, photo_file FROM influencers WHERE id IN (${rows.map((r) => r.id).join(',')})`).map((x) => {
     const path = photoPath(c.dataDir, x);
-    return [x.id, path ? `data:image/${path.endsWith('.png') ? 'png' : 'jpeg'};base64,${readFileSync(path).toString('base64')}` : null];
+    if (!path || statSync(path).size > PHOTO_MAX) return [x.id, null];
+    try {
+      const { bytes, ext } = safePhoto(readFileSync(path));
+      return [x.id, `data:image/${ext === 'png' ? 'png' : 'jpeg'};base64,${bytes.toString('base64')}`];
+    } catch {
+      return [x.id, null];
+    }
   }));
 
   const avatar = (r: Row): Content => (photos.get(r.id)
     ? { image: photos.get(r.id), fit: [58, 58], width: 58 }
     : { width: 58, table: { widths: [58], heights: [58], body: [[{ text: r.name.slice(0, 1).toUpperCase(), fontSize: 24, bold: true, color: ACCENT, alignment: 'center', margin: [0, 15, 0, 0], fillColor: '#eef2ff' }]] }, layout: 'noBorders' });
 
-  const card = (r: Row): Content => {
+  // Header part of a profile stays together; commercials and the rest may continue on the next page.
+  const card = (r: Row): { head: Content[]; tail: Content[] } => {
     const stack: Content[] = [
       { columns: [avatar(r), { width: '*', margin: [10, 2, 0, 0], stack: [
         { text: r.name, bold: true, fontSize: 13 },
         { text: [r.handle, [r.city, r.state].filter(Boolean).join(', '), r.languages.join(', ')].filter(Boolean).join('  ·  '), color: MUTED, fontSize: 8.5, margin: [0, 1, 0, 3] },
-        { text: [{ text: 'Categories: ', color: MUTED }, r.niches.map((n: string) => titleCase(n)).join(', ') || '—', ...(r.availability && r.availability !== 'available' ? [{ text: `   ·   Availability: ${humanize(r.availability)}`, color: MUTED }] : [])], fontSize: 8.5 },
+        { text: [{ text: 'Categories: ', color: MUTED }, r.niches.map((n: string) => label(n.toLowerCase())).join(', ') || '—', ...(r.availability && r.availability !== 'available' ? [{ text: `   ·   Availability: ${humanize(r.availability)}`, color: MUTED }] : [])], fontSize: 8.5 },
       ] }], columnGap: 0, margin: [0, 0, 0, 6] },
       table([{ label: 'Channel', key: 'ch', link: 'url' }, { label: 'Followers', key: 'f' }, { label: 'Prev. avg views', key: 'v' }, { label: 'Median views', key: 'm' }, { label: 'Engagement', key: 'er' }],
         r.platforms.map((p: Row) => ({ ...p, ch: `${nice(p.platform)}${p.handle ? ` @${p.handle}` : ''}`, f: compact(p.followers), v: p.avg_views == null ? 'Not available' : formatNumberIN(p.avg_views), m: p.median_views == null ? '—' : formatNumberIN(p.median_views), er: p.engagement_rate == null ? '—' : `${p.engagement_rate}%` })), { fontSize: 8.5 }),
@@ -602,30 +613,32 @@ function mediaKit(c: Ctx): Built {
       : { text: [{ text: 'Commercials: ', bold: true }, 'on request'], fontSize: 8.5, margin: [0, 0, 0, 5] });
     if (c.sections('collaborations') && r.collaborations.length) stack.push({ text: [{ text: 'Brands worked with: ', bold: true }, r.collaborations.join(', ')], fontSize: 8.5, margin: [0, 0, 0, 5] });
     if (c.sections('top_content') && r.top_content.length) stack.push({ text: [{ text: 'Top content: ', bold: true }, ...r.top_content.flatMap((x: Row, i: number) => [i ? '  ·  ' : '', { text: `${nice(x.format ?? 'post')}${x.topic ? ` — ${x.topic}` : ''} (${compact(x.views)} views)`, link: x.url, color: ACCENT }])], fontSize: 8.5, margin: [0, 0, 0, 5] });
-    return { stack, unbreakable: true, margin: [0, 6, 0, 14] };
+    return { head: stack.slice(0, 3), tail: stack.slice(3) };
   };
 
   const content: Content[] = [];
   if (c.sections('overview')) {
-    if (!category && ordered.length > 1) content.push(h2('Categories'), table([{ label: 'Category', key: 'cat' }, { label: 'Creators', key: 'n', num: true }, { label: 'Instagram followers', key: 'ig' }, { label: 'YouTube subscribers', key: 'yt' }], ordered.map(([k, list]) => ({ cat: titleCase(k), n: list.length, ig: compact(sum(list, 'instagram') || null), yt: compact(sum(list, 'youtube') || null) }))));
-    content.push(muted(agency.kit_note || 'Prices are per deliverable, exclude GST, and depend on usage rights, exclusivity and timelines. Every metric shows its source and date; unavailable figures are marked, never estimated. Previous average views use the latest organic (non-boosted) posts where recorded.'));
+    if (!category && ordered.length > 1) content.push(h2('Categories'), table([{ label: 'Category', key: 'cat' }, { label: 'Creators', key: 'n', num: true }, { label: 'Instagram followers', key: 'ig' }, { label: 'YouTube subscribers', key: 'yt' }], ordered.map(([k, list]) => ({ cat: label(k), n: list.length, ig: compact(sum(list, 'instagram') || null), yt: compact(sum(list, 'youtube') || null) }))));
+    content.push(muted(agency.kit_note || 'Prices are per deliverable, exclude GST, and depend on usage rights, exclusivity and timelines. Every metric shows its source and date; unavailable figures are marked, never estimated. Previous average views use the latest recorded posts, excluding those marked as boosted.'));
   }
   if (c.sections('comparison')) content.push(h2(category ? 'At a glance' : 'Roster at a glance'), table([
     { label: 'Creator', key: 'name' },
     ...(category ? [] : [{ label: 'Category', key: 'cat' }]),
     { label: 'Instagram', key: 'ig', link: 'ig_url' }, { label: 'IG avg views', key: 'igv' },
     { label: 'YouTube', key: 'yt', link: 'yt_url' }, { label: 'YT avg views', key: 'ytv' },
-    { label: 'Engagement', key: 'er' },
+    { label: 'IG engagement', key: 'er' },
     ...(withPrices ? [{ label: 'From', key: 'starting_price', money: true }] : []),
   ], ordered.flatMap(([key, list]) => list.map((r) => {
     const ig = plat(r, 'instagram');
     const yt = plat(r, 'youtube');
-    return { ...r, cat: titleCase(key), ig: ig ? compact(ig.followers) : '—', ig_url: ig?.url, igv: ig ? compact(ig.avg_views) : '—', yt: yt ? compact(yt.followers) : '—', yt_url: yt?.url, ytv: yt ? compact(yt.avg_views) : '—', er: ig?.engagement_rate != null ? `${ig.engagement_rate}%` : '—' };
+    return { ...r, cat: label(key), ig: ig ? compact(ig.followers) : '—', ig_url: ig?.url, igv: ig ? compact(ig.avg_views) : '—', yt: yt ? compact(yt.followers) : '—', yt_url: yt?.url, ytv: yt ? compact(yt.avg_views) : '—', er: ig?.engagement_rate != null ? `${ig.engagement_rate}%` : '—' };
   })), { fontSize: 8 }));
   // Profiles flow page to page; a category heading always stays with its first creator.
   if (c.sections('profiles')) ordered.forEach(([key, list]) => {
-    const [first, ...rest] = list.map(card);
-    content.push({ stack: [{ text: `${titleCase(key)} · ${list.length} creator${list.length === 1 ? '' : 's'}`, style: 'h2' }, first], unbreakable: true }, ...rest);
+    list.map(card).forEach(({ head, tail }, i) => content.push({ stack: [
+      { stack: [...(i ? [] : [{ text: `${label(key)} · ${list.length} creator${list.length === 1 ? '' : 's'}`, style: 'h2' }]), ...head], unbreakable: true },
+      ...tail,
+    ], margin: [0, 6, 0, 14] }));
   });
   const contact = [['Agency', agency.name], ['Email', agency.email], ['Phone', agency.phone], ['Website', agency.website]].filter(([, v]) => v) as [string, string][];
   if (contact.length) content.push(h2('Work with us'), kv(contact));
@@ -634,12 +647,12 @@ function mediaKit(c: Ctx): Built {
   const igTotal = sum(rows, 'instagram');
   const ytTotal = sum(rows, 'youtube');
   return {
-    title: category ? `Media kit — ${titleCase(category)}` : 'Creator media kit',
-    subtitle: category ? `${rows.length} creator${rows.length === 1 ? '' : 's'} in ${titleCase(category)}` : `${rows.length} creators across ${ordered.length} categor${ordered.length === 1 ? 'y' : 'ies'}`,
+    title: category ? `Media kit — ${label(category)}` : ids && rows.length === 1 ? `Media kit — ${rows[0].name}` : 'Creator media kit',
+    subtitle: category ? `${rows.length} creator${rows.length === 1 ? '' : 's'} in ${label(category)}` : `${rows.length} creator${rows.length === 1 ? '' : 's'} across ${ordered.length} categor${ordered.length === 1 ? 'y' : 'ies'}`,
     recipient: c.params.recipient || 'brand partners',
     asOf: `Figures as of ${formatDate(c.today)}`,
     summary: [
-      `${rows.length} creator${rows.length === 1 ? '' : 's'}${category ? '' : ` in ${ordered.map(([k]) => titleCase(k)).join(', ')}`}.`,
+      `${rows.length} creator${rows.length === 1 ? '' : 's'}${category ? '' : ` in ${ordered.map(([k]) => label(k)).join(', ')}`}.`,
       [igTotal ? `${compact(igTotal)} combined Instagram followers` : null, ytTotal ? `${compact(ytTotal)} combined YouTube subscribers` : null].filter(Boolean).join(' · ') || 'Follower counts not recorded.',
       !withPrices ? 'Commercials on request.' : prices.length ? `Commercials from ${money(Math.min(...prices))} per deliverable (excl. GST).` : 'No commercials recorded yet — on request.',
     ],
@@ -722,7 +735,7 @@ export async function produce(db: Db, dataDir: string, runId: number): Promise<v
     update(db, 'report_runs', runId, { status: 'completed', progress: 100, file: `${base}.pdf`, csv_file: `${base}.csv`, title: built.title, snapshot: snapshot.length < 500_000 ? built.data : { note: 'Snapshot too large to archive inline' }, finished_at: new Date().toISOString() });
     if (user) notify(db, [user.id], { kind: 'report', title: `Report ready: ${built.title}`, link: `/reports/${runId}`, dedupe: `report:${runId}` });
   } catch (err) {
-    update(db, 'report_runs', runId, { status: 'failed', error: (err as Error).message.slice(0, 500), finished_at: new Date().toISOString() });
+    update(db, 'report_runs', runId, { status: 'failed', error: String((err as Error)?.message ?? err).slice(0, 500), finished_at: new Date().toISOString() });
     throw err;
   }
 }
@@ -735,7 +748,7 @@ export function requestReport(db: Db, user: User | null, v: { report_type: strin
   if (user && !canGenerate(user, v.report_type, audience)) throw new HttpError(403, 'You cannot generate this report');
   const params = v.params ?? {};
   if (params.analysis_id && def.ai) analysisFor(db, { params, audience, user, ...periodOf(params, today(db)) }, def.ai, null);
-  if (v.report_type === 'roster' && params.category !== undefined && (typeof params.category !== 'string' || params.category.length > 60)) throw new HttpError(400, 'Invalid category');
+  if (v.report_type === 'roster' && params.category !== undefined && (typeof params.category !== 'string' || params.category.length > 200)) throw new HttpError(400, 'Invalid category');
   const same = JSON.stringify(params);
   const version = all(db, 'SELECT params FROM report_runs WHERE report_type = ? AND audience = ?', v.report_type, audience).filter((x) => x.params === same).length + 1;
   const id = insert(db, 'report_runs', { report_type: v.report_type, audience, params, status: 'queued', progress: 0, attempts: 0, version, template_id: v.template_id ?? null, title: def.label, created_by: user?.id ?? null });

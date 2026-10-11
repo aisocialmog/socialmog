@@ -5,6 +5,8 @@
 import express, { type Express, type Request } from 'express';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { inflateSync } from 'node:zlib';
 import { addDays, diffDays, financialYearStart, formatDate, weekStart } from '../shared/dates.ts';
 import { dealEconomics, mean, median, pctChange, STAGE_PROBABILITY } from '../shared/calc.ts';
 import { formatINR, splitProportional } from '../shared/money.ts';
@@ -385,7 +387,10 @@ export function shortlist(db: Db, q: ShortlistQuery, canSeeRates: boolean) {
 // ---------------------------------------------------------------- roster & media kit figures
 
 const KIT_POSTS = 10;
-const LINK: Record<string, (h: string) => string> = { instagram: (h) => `https://www.instagram.com/${h}/`, youtube: (h) => `https://www.youtube.com/@${h}` };
+const LINK: Record<string, (h: string) => string> = { instagram: (h) => `https://www.instagram.com/${encodeURIComponent(h)}/`, youtube: (h) => `https://www.youtube.com/@${encodeURIComponent(h)}` };
+/** Only web links reach the roster and brand PDFs (no javascript:, file: …). */
+const webUrl = (u: unknown) => (typeof u === 'string' && /^https?:\/\//i.test(u) ? u : null);
+const counted = (x: Row) => ['likes', 'comments', 'shares', 'saves'].every((k) => typeof x.metrics[k] === 'number');
 
 /**
  * Per-creator figures for the roster and brand media kits: channel links, followers, previous average views
@@ -407,27 +412,29 @@ export function creatorStats(db: Db, ids: number[] | null, opts: { commercials: 
   for (const i of infs) {
     const platforms = ((i.platforms ?? []) as Row[]).map((p) => {
       const handle = p.handle ? String(p.handle).replace(/^@/, '') : null;
+      // Boosted posts are left out; posts with unknown promotion are included (and the basis says so).
       const mine = posts.filter((x) => x.influencer_id === i.id && x.platform === p.platform && x.promotion !== 'paid').slice(0, KIT_POSTS);
       const enough = mine.length >= 3;
       const views = mine.map((x) => x.metrics.views as number);
-      const reached = mine.filter((x) => x.metrics.reach > 0);
-      const interactions = (x: Row) => ['likes', 'comments', 'shares', 'saves'].reduce((a, k) => a + (Number(x.metrics[k]) || 0), 0);
+      // Engagement only from posts with every interaction recorded, so missing data never reads as 0%.
+      const reached = mine.filter((x) => x.metrics.reach > 0 && counted(x));
+      const interactions = (x: Row) => ['likes', 'comments', 'shares', 'saves'].reduce((a, k) => a + x.metrics[k], 0);
       const snap = snaps.find((x) => x.influencer_id === i.id && x.platform === p.platform && x.followers != null);
-      const fromSnap = !!snap && (!p.updated_at || snap.period_end >= String(p.updated_at).slice(0, 10));
+      const fromSnap = !!snap && (p.followers == null || !p.updated_at || snap.period_end >= String(p.updated_at).slice(0, 10));
       const profileBasis = `${p.source ?? 'Profile entry'}${p.updated_at ? `, as of ${formatDate(p.updated_at)}` : ''}`;
       return {
-        platform: p.platform, handle, url: p.url ?? (handle && LINK[p.platform] ? LINK[p.platform](handle) : null),
+        platform: p.platform, handle, url: webUrl(p.url) ?? (handle && LINK[p.platform] ? LINK[p.platform](handle) : null),
         followers: fromSnap ? snap!.followers : p.followers ?? null,
         followers_basis: fromSnap ? `Weekly snapshot, week ending ${formatDate(snap!.period_end)}` : p.followers != null ? profileBasis : null,
         avg_views: enough ? Math.round(mean(views)!) : p.avg_views ?? null,
         median_views: enough ? Math.round(median(views)!) : p.median_views ?? null,
-        views_basis: enough ? `Last ${mine.length} organic posts, ${formatDate(mine[mine.length - 1].published_at)} – ${formatDate(mine[0].published_at)}` : p.avg_views != null ? profileBasis : null,
+        views_basis: enough ? `Last ${mine.length} posts (boosted posts excluded), ${formatDate(mine[mine.length - 1].published_at)} – ${formatDate(mine[0].published_at)}` : p.avg_views != null ? profileBasis : null,
         engagement_rate: reached.length >= 3 ? Math.round((reached.reduce((a, x) => a + interactions(x), 0) / reached.reduce((a, x) => a + x.metrics.reach, 0)) * 10_000) / 100 : p.engagement_rate ?? null,
-        engagement_basis: reached.length >= 3 ? `(likes + comments + shares + saves) ÷ reach, last ${reached.length} organic posts` : p.engagement_rate != null ? profileBasis : null,
+        engagement_basis: reached.length >= 3 ? `(likes + comments + shares + saves) ÷ reach, last ${reached.length} posts (boosted excluded)` : p.engagement_rate != null ? profileBasis : null,
       };
     });
     const commercials = opts.commercials
-      ? ((i.rate_card ?? []) as Row[]).map((r) => ({ deliverable: r.deliverable, platform: r.platform ?? null, price: r.brand_rate ?? r.rate ?? null })).filter((r) => r.price != null)
+      ? ((i.rate_card ?? []) as Row[]).map((r) => ({ deliverable: r.deliverable ?? null, platform: r.platform ?? null, price: r.brand_rate ?? r.rate ?? null })).filter((r) => typeof r.price === 'number')
       : null;
     out.set(i.id, {
       id: i.id, name: i.name, handle: i.handle, photo: !!i.photo_file, photo_url: i.photo_url ?? null, updated_at: i.updated_at ?? i.created_at,
@@ -435,7 +442,7 @@ export function creatorStats(db: Db, ids: number[] | null, opts: { commercials: 
       audience: i.audience ?? null, platforms,
       commercials, starting_price: commercials?.length ? Math.min(...commercials.map((c) => c.price)) : null,
       collaborations: collabs.filter((c) => c.influencer_id === i.id).map((c) => c.name),
-      top_content: posts.filter((x) => x.influencer_id === i.id && x.promotion !== 'paid' && x.permalink).sort((a, b) => b.metrics.views - a.metrics.views).slice(0, 3)
+      top_content: posts.filter((x) => x.influencer_id === i.id && x.promotion !== 'paid' && webUrl(x.permalink)).sort((a, b) => b.metrics.views - a.metrics.views).slice(0, 3)
         .map((x) => ({ url: x.permalink, platform: x.platform, format: x.format, topic: x.topic, views: x.metrics.views, published_at: x.published_at })),
     });
   }
@@ -447,6 +454,51 @@ export function photoPath(dataDir: string, inf: Row): string | null {
   if (!inf?.photo_file) return null;
   const p = join(dataDir, 'uploads', 'photos', inf.photo_file);
   return existsSync(p) ? p : null;
+}
+
+export const PHOTO_MAX = 512 * 1024;
+
+/** Drops JPEG metadata (EXIF incl. GPS and device, XMP, IPTC, comments); keeps JFIF, ICC and Adobe colour segments. Throws if malformed. */
+export function stripJpegMetadata(b: Buffer): Buffer {
+  const out: Buffer[] = [b.subarray(0, 2)];
+  let i = 2;
+  let frame = false;
+  while (i + 4 <= b.length) {
+    if (b[i] !== 0xff) throw new Error('Malformed JPEG');
+    const m = b[i + 1];
+    if (m === 0xff) {
+      i++; // fill byte
+      continue;
+    }
+    if (m === 0xda) {
+      if (!frame) throw new Error('Malformed JPEG');
+      out.push(b.subarray(i)); // start of scan: the rest is image data
+      return Buffer.concat(out);
+    }
+    const len = b.readUInt16BE(i + 2);
+    if (len < 2 || i + 2 + len > b.length) throw new Error('Truncated JPEG');
+    if ((m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc)) frame = true;
+    const metadata = m === 0xe1 || (m >= 0xe3 && m <= 0xed) || m === 0xef || m === 0xfe;
+    if (!metadata) out.push(b.subarray(i, i + 2 + len));
+    i += 2 + len;
+  }
+  throw new Error('Truncated JPEG');
+}
+
+const PDFKit = createRequire(import.meta.url)('@foliojs-fork/pdfkit');
+/** Cleans and checks a photo so a damaged or crafted file can never break PDF generation. Returns the bytes to store/embed. */
+export function safePhoto(body: Buffer): { bytes: Buffer; ext: 'png' | 'jpg' } {
+  const png = body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const jpg = body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff;
+  if (!png && !jpg) throw new HttpError(400, 'Upload a PNG or JPEG image');
+  try {
+    const bytes = jpg ? stripJpegMetadata(body) : body;
+    const img = new PDFKit().openImage(bytes);
+    if (png) inflateSync(img.image.imgData); // pdfkit inflates PNG data asynchronously later; fail here instead
+    return { bytes, ext: png ? 'png' : 'jpg' };
+  } catch {
+    throw new HttpError(400, 'That image file is damaged or incomplete');
+  }
 }
 
 // ---------------------------------------------------------------- campaign health
@@ -670,21 +722,20 @@ export function domainRoutes(app: Express, opts: AppOptions) {
 
   // Creator photo / logo for the roster and media kits.
   const photoDir = join(opts.dataDir, 'uploads', 'photos');
-  app.post('/api/influencers/:id/photo', express.raw({ type: () => true, limit: '3mb' }), (req, res) => {
+  app.post('/api/influencers/:id/photo', express.raw({ type: () => true, limit: PHOTO_MAX }), (req, res) => {
     const u = requireCap(req, 'talent');
     const inf = get(req.db, 'SELECT * FROM influencers WHERE id = ? AND archived_at IS NULL', Number(req.params.id));
     if (!inf) throw new HttpError(404, 'Creator not found');
     const body = req.body as Buffer;
     if (!Buffer.isBuffer(body) || !body.length) throw new HttpError(400, 'Empty file');
-    // Check the bytes, not the declared type.
-    const ext = body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'png' : body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff ? 'jpg' : null;
-    if (!ext) throw new HttpError(400, 'Upload a PNG or JPEG image');
+    // Checks the bytes (not the declared type) and strips location/device metadata before anything is stored.
+    const { bytes, ext } = safePhoto(body);
     mkdirSync(photoDir, { recursive: true });
     if (inf.photo_file) rmSync(join(photoDir, inf.photo_file), { force: true });
     const file = `influencer-${inf.id}-${Date.now()}.${ext}`;
-    writeFileSync(join(photoDir, file), body);
+    writeFileSync(join(photoDir, file), bytes);
     update(req.db, 'influencers', inf.id, { photo_file: file });
-    audit(req.db, u.id, 'upload', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: file, size: body.length });
+    audit(req.db, u.id, 'upload', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: file, size: bytes.length });
     res.json({ ok: true });
   });
 

@@ -15,6 +15,8 @@ const db = openDb(':memory:');
 const dataDir = mkdtempSync(join(tmpdir(), 'hq-kit-'));
 let server: Server;
 let base = '';
+// 16x16 JPEG carrying EXIF with a phone model and GPS coordinates.
+const GPS_JPEG = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/4QCoRXhpZgAATU0AKgAAAAgAAgEQAAIAAAATAAAAJoglAAQAAAABAAAAOgAAAABTRUNSRVQtUEhPTkUtTU9ERUwAAAAEAAEAAgAAAAJOAAAAAAIABQAAAAMAAABwAAMAAgAAAAJFAAAAAAQABQAAAAMAAACIAAAAAAAAABMAAAABAAAABAAAAAEAAAM8AAAAGQAAAEgAAAABAAAAMgAAAAEAAAAZAAAAAv/bAEMABgQFBgUEBgYFBgcHBggKEAoKCQkKFA4PDBAXFBgYFxQWFhodJR8aGyMcFhYgLCAjJicpKikZHy0wLSgwJSgpKP/bAEMBBwcHCggKEwoKEygaFhooKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKP/AABEIABAAEAMBIgACEQEDEQH/xAAfAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgv/xAC1EAACAQMDAgQDBQUEBAAAAX0BAgMABBEFEiExQQYTUWEHInEUMoGRoQgjQrHBFVLR8CQzYnKCCQoWFxgZGiUmJygpKjQ1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4eLj5OXm5+jp6vHy8/T19vf4+fr/xAAfAQADAQEBAQEBAQEBAAAAAAAAAQIDBAUGBwgJCgv/xAC1EQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/AMiiiivkT9IP/9k=', 'base64');
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 before(async () => {
@@ -49,19 +51,31 @@ test('previous average views: latest organic posts, else the profile figure with
   assert.equal(yt.avg_views, null, 'nothing recorded stays unavailable');
   assert.equal(yt.views_basis, null);
   assert.equal(yt.url, 'https://www.youtube.com/@kittest');
-  [1000, 2000, 3000, 4000].forEach((views, i) => insert(db, 'posts', { influencer_id: inf, platform: 'instagram', external_id: `k${i}`, permalink: `https://instagram.com/p/k${i}`, published_at: `2026-10-0${i + 2}T10:00:00Z`, promotion: 'organic', metrics: { views, reach: views, likes: views / 10 } }));
+  [1000, 2000, 3000, 4000].forEach((views, i) => insert(db, 'posts', { influencer_id: inf, platform: 'instagram', external_id: `k${i}`, permalink: i === 3 ? 'javascript:alert(1)' : `https://instagram.com/p/k${i}`, published_at: `2026-10-0${i + 2}T10:00:00Z`, promotion: i === 0 ? 'unknown' : 'organic', metrics: { views, reach: views, likes: views / 10, comments: 0, shares: 0, saves: 0 } }));
   insert(db, 'posts', { influencer_id: inf, platform: 'instagram', external_id: 'paid', permalink: 'https://instagram.com/p/paid', published_at: '2026-10-08T10:00:00Z', promotion: 'paid', metrics: { views: 1_000_000 } });
   s = creatorStats(db, [inf], { commercials: true }).get(inf)!;
   const ig2 = s.platforms.find((p: any) => p.platform === 'instagram');
   assert.equal(ig2.avg_views, 2500, 'boosted posts are left out');
   assert.equal(ig2.median_views, 2500);
-  assert.match(ig2.views_basis, /Last 4 organic posts, 2 Oct 2026 – 5 Oct 2026/);
+  assert.match(ig2.views_basis, /Last 4 posts \(boosted posts excluded\), 2 Oct 2026 – 5 Oct 2026/);
   assert.equal(ig2.engagement_rate, 10);
   assert.deepEqual(s.commercials.map((c: any) => c.price), [2500000, 500000], 'brand price first, else rate card');
   assert.equal(s.starting_price, 500000);
   assert.ok(!JSON.stringify(s).includes('1500000'), 'negotiated rate never exposed');
-  assert.equal(s.top_content[0].views, 4000);
+  assert.equal(s.top_content[0].views, 3000, 'non-web links (javascript:) never become links');
+  assert.ok(s.top_content.every((x: any) => x.url.startsWith('https://')));
   assert.equal(creatorStats(db, [inf], { commercials: false }).get(inf)!.commercials, null);
+});
+
+test('missing data never turns into zero; unsafe links and stale follower rules', () => {
+  const inf = insert(db, 'influencers', { name: 'Gaps', relationship: 'exclusive', niches: ['DIY'],
+    platforms: [{ platform: 'instagram', handle: '@gaps', url: 'javascript:alert(1)', engagement_rate: 4.1, avg_views: 500, source: 'Screenshot', updated_at: '2026-10-10' }] });
+  [100, 200, 300].forEach((views, i) => insert(db, 'posts', { influencer_id: inf, platform: 'instagram', external_id: `g${i}`, published_at: `2026-10-0${i + 2}T10:00:00Z`, metrics: { views, reach: views } }));
+  insert(db, 'analytics_snapshots', { influencer_id: inf, platform: 'instagram', period_start: '2026-09-28', period_end: '2026-10-04', metrics: { followers_end: 77777 }, source: 'Instagram API' });
+  const ig = creatorStats(db, [inf], { commercials: true }).get(inf)!.platforms[0];
+  assert.equal(ig.engagement_rate, 4.1, 'posts without interactions do not give 0%');
+  assert.equal(ig.followers, 77777, 'snapshot followers used when the profile has none');
+  assert.equal(ig.url, 'https://www.instagram.com/gaps/', 'javascript: URL replaced by the handle link');
 });
 
 test('media kits: whole roster grouped by primary category; category kits filter by any category; brand-safe content', async () => {
@@ -100,6 +114,14 @@ test('creator photos: PNG/JPEG only, talent managers upload, editors cannot view
   const tm = await login('sana@demo.socialmog.in');
   const bad = await tm(`/api/influencers/${riya}/photo`, { method: 'POST', body: Buffer.from('<svg onload="alert(1)"/>'), headers: { 'content-type': 'image/png' } });
   assert.equal(bad.status, 400, 'declared type is not trusted');
+  const corrupt = await tm(`/api/influencers/${riya}/photo`, { method: 'POST', body: Buffer.concat([PNG.subarray(0, 8), Buffer.from('not really a png')]) });
+  assert.equal(corrupt.status, 400, 'damaged images are rejected before they can break a kit');
+  const big = await tm(`/api/influencers/${riya}/photo`, { method: 'POST', body: Buffer.concat([PNG, Buffer.alloc(600 * 1024)]) });
+  assert.equal(big.status, 413);
+  assert.equal((await tm(`/api/influencers/${riya}/photo`, { method: 'POST', body: GPS_JPEG })).status, 200);
+  const stored = Buffer.from(await (await tm(`/api/influencers/${riya}/photo`)).arrayBuffer());
+  assert.ok(GPS_JPEG.includes('SECRET-PHONE-MODEL') && !stored.includes('SECRET-PHONE-MODEL') && !stored.includes('Exif'), 'EXIF (device, GPS) stripped');
+  assert.equal(stored.subarray(0, 2).toString('hex'), 'ffd8');
   const ok = await tm(`/api/influencers/${riya}/photo`, { method: 'POST', body: PNG, headers: { 'content-type': 'image/png' } });
   assert.equal(ok.status, 200);
   const img = await tm(`/api/influencers/${riya}/photo`);
@@ -114,8 +136,22 @@ test('creator photos: PNG/JPEG only, talent managers upload, editors cannot view
   assert.ok(stats.rows.find((r: any) => r.id === riya).commercials.length > 0, 'talent managers see commercials');
   const kit = requestReport(db, founder(), { report_type: 'roster', audience: 'external', params: { influencer_ids: [riya] } });
   await produce(db, dataDir, kit);
-  assert.equal(get(db, 'SELECT status FROM report_runs WHERE id = ?', kit)!.status, 'completed');
+  const run = get(db, 'SELECT * FROM report_runs WHERE id = ?', kit)!;
+  assert.equal(run.status, 'completed');
+  assert.equal(run.title, 'Media kit — Riya Sharma');
+  assert.ok(!readFileSync(join(dataDir, 'reports', run.file)).includes('SECRET-PHONE-MODEL'), 'no device/GPS data in the brand PDF');
   assert.equal((await tm(`/api/influencers/${riya}/photo`, { method: 'DELETE' })).status, 200);
   assert.equal((await tm(`/api/influencers/${riya}/photo`)).status, 404);
-  update(db, 'influencers', riya, {});
+});
+
+test('a very long profile still appears in full (it continues on the next page)', async () => {
+  const inf = insert(db, 'influencers', { name: 'Long Card', relationship: 'exclusive', niches: ['tech'],
+    platforms: [{ platform: 'instagram', handle: '@long', followers: 1000 }, { platform: 'youtube', handle: '@long', followers: 2000 }],
+    rate_card: Array.from({ length: 40 }, (_, i) => ({ deliverable: i % 2 ? 'reel' : null, platform: 'instagram', rate: 100000 * (i + 1) })) });
+  const id = requestReport(db, founder(), { report_type: 'roster', audience: 'external', params: { influencer_ids: [inf] } });
+  await produce(db, dataDir, id);
+  const run = get(db, 'SELECT * FROM report_runs WHERE id = ?', id)!;
+  assert.equal(run.status, 'completed', run.error);
+  const pdf = readFileSync(join(dataDir, 'reports', run.file)).toString('latin1');
+  assert.ok((pdf.match(/\/Type \/Page\b/g) ?? []).length >= 2, 'spans pages instead of being dropped');
 });
