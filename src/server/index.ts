@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createApp, errorHandler, hashPassword } from './app.ts';
-import { get, getSetting, insert, openDb } from './db.ts';
+import { audit, get, getSetting, insert, openDb, run } from './db.ts';
 import { cloudEnabled, restoreFromCloud, startCloudSync } from './cloud.ts';
 import { backfillTdsCredits } from './finance.ts';
 import { startScheduler } from './jobs.ts';
@@ -23,11 +23,24 @@ if (wiped && !cloudEnabled()) throw new Error('Set SUPABASE_URL and SUPABASE_SER
 await restoreFromCloud(dataDir);
 const db = openDb(join(dataDir, 'hq.sqlite'));
 
+// Values pasted into a host's settings often carry a stray space or newline.
+const founderEmail = process.env.FOUNDER_EMAIL?.trim();
+const founderPassword = process.env.FOUNDER_PASSWORD?.trim();
 if (!get(db, 'SELECT id FROM users LIMIT 1')) {
-  const email = process.env.FOUNDER_EMAIL || 'founder@socialmog.in';
-  const password = process.env.FOUNDER_PASSWORD || randomBytes(9).toString('base64url');
+  const email = founderEmail || 'founder@socialmog.in';
+  const password = founderPassword || randomBytes(9).toString('base64url');
   insert(db, 'users', { name: process.env.FOUNDER_NAME || 'Founder', email, role: 'founder', status: 'active', password_hash: hashPassword(password) });
-  console.log(`\nCreated founder account: ${email}${process.env.FOUNDER_PASSWORD ? '' : `  password: ${password}  (change it in Settings)`}\n`);
+  console.log(`\nCreated founder account: ${email}${founderPassword ? '' : `  password: ${password}  (change it in Settings)`}\n`);
+}
+// Locked out of the founder login: start once with FOUNDER_RESET=1 (plus FOUNDER_EMAIL / FOUNDER_PASSWORD), then remove it.
+if (process.env.FOUNDER_RESET === '1') {
+  if (!founderEmail || !founderPassword || founderPassword.length < 10) throw new Error('FOUNDER_RESET=1 needs FOUNDER_EMAIL and a FOUNDER_PASSWORD of 10+ characters.');
+  const f = get(db, `SELECT id FROM users WHERE role = 'founder' AND archived_at IS NULL ORDER BY (lower(email) = lower(?)) DESC, id LIMIT 1`, founderEmail);
+  if (!f) throw new Error('FOUNDER_RESET=1: no founder account found.');
+  run(db, `UPDATE users SET email = ?, password_hash = ?, status = 'active', failed_logins = 0, locked_until = NULL WHERE id = ?`, founderEmail, hashPassword(founderPassword), f.id);
+  run(db, 'DELETE FROM sessions WHERE user_id = ?', f.id);
+  audit(db, null, 'reset_password', 'users', f.id, null, { email: founderEmail, via: 'FOUNDER_RESET' });
+  console.log(`\nFounder login reset: ${founderEmail}. Remove FOUNDER_RESET from the settings now.\n`);
 }
 // Demo data only ever goes into a brand-new database (the founder login at most), never one holding real records.
 if (process.env.SEED_DEMO !== '0' && !getSetting(db, 'demo_seeded', false)) {

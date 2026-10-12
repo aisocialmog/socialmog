@@ -29,6 +29,8 @@ A temporary, no-cost setup for the first few weeks. The app keeps its database a
 
 **Moving to the cloud server later (in this order):** (1) Check **Settings → Data & backups** shows a recent save, copy `APP_SECRET` from the host's variables, then stop the app (Railway: remove the deployment; Render: **Suspend**); it saves once more as it stops. (2) On the new server run `sudo SUPABASE_URL=… SUPABASE_SERVICE_KEY=… APP_SECRET=… bash deploy/setup.sh <domain or auto> <founder email>`: its first start downloads everything from Supabase, and it keeps saving there as a free off-site copy. (3) Sign in with the usual logins and check recent records, then **delete** the Railway or Render service so it can never start again and take over. (If a server already has its own database, the app refuses to start rather than pick one; the message says how to choose.) **Without Supabase:** click **Download everything**, stop the app, copy the file to the new server and run `sudo RESTORE_FROM=/path/to/socialmog-hq-everything-….tar.gz APP_SECRET=… bash deploy/setup.sh <domain or auto> <founder email>`. With `auto` instead of a domain, the app gets a free address from the server's IP (`hq-1-2-3-4.sslip.io`) with HTTPS.
 
+**Can't sign in as founder?** The founder login is made only on the very first start. Set `FOUNDER_RESET=1` with the `FOUNDER_EMAIL` and `FOUNDER_PASSWORD` you want, restart once (records are untouched), sign in, then delete `FOUNDER_RESET`.
+
 ## Run it
 
 Requires Node.js **22.18+** (Node runs the TypeScript directly; no build step for the server).
