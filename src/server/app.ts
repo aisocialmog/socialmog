@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { isIsoDate } from '../shared/dates.ts';
 import { paiseToRupeesString } from '../shared/money.ts';
 import { can, ENTITIES, ENTITY, fieldLabel, INTERNAL_ROLES, ROLES, type Cap, type Entity, type Role } from '../shared/schema.ts';
+import { writeArchive } from './archive.ts';
 import { cloudStatus, mirrorFile, refuseWritesWhenSuperseded } from './cloud.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, setSetting, tx, update, type Db, type Row, type User } from './db.ts';
 import { afterWrite, beforeWrite, domainRoutes } from './domain.ts';
@@ -634,6 +635,21 @@ export function createApp(db: Db, opts: AppOptions) {
     audit(db, u.id, 'backup', 'system', null, null, { file });
     res.setHeader('Content-Disposition', `attachment; filename="socialmog-hq-backup.sqlite"`);
     res.send(readFileSync(file));
+  });
+
+  // Database + every stored file in one .tar.gz, for moving to another server (unpack into its data folder).
+  app.get('/api/admin/everything.tar.gz', async (req, res) => {
+    const u = requireCap(req, 'admin');
+    res.setHeader('Content-Type', 'application/gzip');
+    res.setHeader('Content-Disposition', `attachment; filename="socialmog-hq-everything-${new Date().toISOString().slice(0, 10)}.tar.gz"`);
+    try {
+      const files = await writeArchive(db, opts.dataDir, res);
+      audit(db, u.id, 'export', 'system', null, null, { everything: true, files });
+    } catch (err) {
+      // Headers are already sent: cut the download so the browser reports it as failed rather than complete.
+      console.error('Download everything', err);
+      res.destroy(err as Error);
+    }
   });
 
   app.get('/api/admin/cloud', (req, res) => {

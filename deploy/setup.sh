@@ -2,6 +2,8 @@
 # One-time setup of Socialmog HQ on a fresh Ubuntu server (Oracle Cloud Always Free, or any VPS).
 # Run as:  sudo bash setup.sh hq.yourdomain.tech you@youremail.com
 # Safe to re-run: it keeps an existing .env and data, and only refreshes code, service and proxy.
+# Moving from another host: add RESTORE_FROM=/path/to/socialmog-hq-everything-….tar.gz (Settings > Data & backups >
+# Download everything) and APP_SECRET=<the old host's value>, e.g.  sudo RESTORE_FROM=… APP_SECRET=… bash setup.sh …
 set -euo pipefail
 
 DOMAIN="${1:-}"; FOUNDER_EMAIL="${2:-}"
@@ -48,6 +50,13 @@ netfilter-persistent save
 echo "==> 5/7 App code"
 id "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 mkdir -p "$DATA_DIR" && chown "$APP_USER:$APP_USER" "$DATA_DIR" && chmod 700 "$DATA_DIR"
+if [[ -n "${RESTORE_FROM:-}" ]]; then
+  if [[ -f "$DATA_DIR/hq.sqlite" ]]; then echo "Not restoring: $DATA_DIR already has a database (nothing was changed)."
+  else
+    tar -xzf "$RESTORE_FROM" -C "$DATA_DIR" && chown -R "$APP_USER:$APP_USER" "$DATA_DIR"
+    echo "Restored the database and files from $RESTORE_FROM"
+  fi
+fi
 git config --global --add safe.directory "$APP_DIR"
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ ! -d "$APP_DIR/.git" && -d "$SRC/.git" && "$SRC" != "$APP_DIR" ]]; then
@@ -127,8 +136,8 @@ sleep 3
 systemctl is-active --quiet socialmoghq && echo "App is running." || { echo "App failed to start. See: journalctl -u socialmoghq -n 50"; exit 1; }
 echo
 echo "Done. Open https://$DOMAIN in a few minutes (HTTPS appears once your domain points at this server)."
-if grep -q '^SUPABASE_URL=' "$APP_DIR/.env"; then
-  echo "Data comes from Supabase: sign in with the same logins as before. Check Settings > Data & backups > Saved to Supabase."
+if [[ -n "${RESTORE_FROM:-}" ]] || grep -q '^SUPABASE_URL=' "$APP_DIR/.env"; then
+  echo "Your data was brought over: sign in with the same logins as before and check recent records."
   rm -f /root/socialmog-founder-password.txt
 elif [[ -f /root/socialmog-founder-password.txt ]]; then
   echo "Sign in as $FOUNDER_EMAIL with password: $(cat /root/socialmog-founder-password.txt)"

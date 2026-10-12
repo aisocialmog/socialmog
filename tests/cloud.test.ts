@@ -98,3 +98,31 @@ test('Supabase saving: first start, save, wiped disk restores data and files, ne
   assert.ok(get(openDb(join(dir4, 'hq.sqlite')), `SELECT 1 FROM tasks WHERE title = 'typed during the redeploy'`));
   assert.equal(JSON.parse(objects.get('db/lease.json')!.toString()).boot !== 'newer-copy', true, 'took the lease');
 });
+
+test('download everything: database and every stored file (long and spaced names too) unpack with standard tar', async () => {
+  const { writeArchive } = await import('../src/server/archive.ts');
+  const { PassThrough } = await import('node:stream');
+  const { execFileSync } = await import('node:child_process');
+  const { mkdirSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'hq-arch-'));
+  const db = openDb(join(dir, 'hq.sqlite'));
+  insert(db, 'tasks', { title: 'In the archive' });
+  mkdirSync(join(dir, 'uploads', 'photos'), { recursive: true });
+  mkdirSync(join(dir, 'reports'));
+  const long = `12-1760000000000-${'Signed contract with Glow Co for the Diwali launch '.repeat(2).trim()}.pdf`;
+  writeFileSync(join(dir, 'uploads', long), 'contract');
+  writeFileSync(join(dir, 'uploads', 'photos', 'influencer-1-1.jpg'), Buffer.alloc(70_000, 7));
+  writeFileSync(join(dir, 'reports', '1-roster-v1.pdf'), 'pdf');
+  const out = new PassThrough();
+  const chunks: Buffer[] = [];
+  out.on('data', (c) => chunks.push(c));
+  assert.equal(await writeArchive(db, dir, out), 3);
+  const file = join(dir, 'everything.tar.gz');
+  writeFileSync(file, Buffer.concat(chunks));
+  const into = mkdtempSync(join(tmpdir(), 'hq-unpack-'));
+  execFileSync('tar', ['-xzf', file, '-C', into]);
+  assert.equal(get(openDb(join(into, 'hq.sqlite')), 'SELECT title FROM tasks')!.title, 'In the archive');
+  assert.equal(readFileSync(join(into, 'uploads', long), 'utf8'), 'contract');
+  assert.equal(readFileSync(join(into, 'uploads', 'photos', 'influencer-1-1.jpg')).length, 70_000);
+  assert.equal(readFileSync(join(into, 'reports', '1-roster-v1.pdf'), 'utf8'), 'pdf');
+});

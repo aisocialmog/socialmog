@@ -263,7 +263,9 @@ function Data() {
       <div className="grid two">
         <Card title="Backups & export" hint="Daily automatic backups are kept for 14 days in the server's data folder. Download one before major changes.">
           <div className="row"><a className="btn" href="/api/admin/backup">Download database backup</a><a className="btn" href="/api/admin/export.json">Export all records (JSON)</a></div>
-          <p className="small muted" style={{ marginTop: 8 }}>Restore: stop the server, replace data/hq.sqlite with a backup file, start again.</p>
+          <div className="row" style={{ marginTop: 8 }}><a className="btn primary" href="/api/admin/everything.tar.gz">Download everything</a></div>
+          <p className="small muted" style={{ marginTop: 8 }}>"Download everything" is the database plus every uploaded file, creator photo and report PDF in one .tar.gz file, for moving to another server or keeping a full copy. The database backup alone does not include files.</p>
+          <p className="small muted">Restore: stop the server, replace data/hq.sqlite with a backup file (or unpack the "everything" file into the data folder), start again.</p>
         </Card>
         <CloudCard />
         <Card title="Demo data" hint={me.demo ? 'Demo records are loaded and marked DEMO.' : 'No demo data loaded.'}>
