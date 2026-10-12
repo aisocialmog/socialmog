@@ -14,7 +14,13 @@ DATA_DIR=/var/lib/socialmoghq
 APP_USER=socialmog
 
 if [[ $EUID -ne 0 ]]; then echo "Run with sudo: sudo bash setup.sh <domain> <founder-email>"; exit 1; fi
-if [[ -z "$DOMAIN" || -z "$FOUNDER_EMAIL" ]]; then echo "Usage: sudo bash setup.sh <domain, e.g. hq.socialmog.tech> <founder email>"; exit 1; fi
+if [[ -z "$DOMAIN" || -z "$FOUNDER_EMAIL" ]]; then echo "Usage: sudo bash setup.sh <domain, e.g. hq.socialmog.tech, or auto> <founder email>"; exit 1; fi
+# No domain? "auto" uses a free address that points at this server's IP (sslip.io), and HTTPS still works.
+if [[ "$DOMAIN" == "auto" ]]; then
+  IP="$(curl -fsS4 https://api.ipify.org)" || { echo "Could not find this server's public IP; pass a domain instead of auto."; exit 1; }
+  DOMAIN="hq-${IP//./-}.sslip.io"
+  echo "Using the address $DOMAIN"
+fi
 
 echo "==> 1/7 System packages"
 export DEBIAN_FRONTEND=noninteractive
@@ -135,7 +141,7 @@ echo "30 3 * * * root /usr/local/bin/socialmog-offsite-backup >> /var/log/social
 sleep 3
 systemctl is-active --quiet socialmoghq && echo "App is running." || { echo "App failed to start. See: journalctl -u socialmoghq -n 50"; exit 1; }
 echo
-echo "Done. Open https://$DOMAIN in a few minutes (HTTPS appears once your domain points at this server)."
+echo "Done. Open https://$DOMAIN in a few minutes (HTTPS appears once the address points at this server)."
 if [[ -n "${RESTORE_FROM:-}" ]] || grep -q '^SUPABASE_URL=' "$APP_DIR/.env"; then
   echo "Your data was brought over: sign in with the same logins as before and check recent records."
   rm -f /root/socialmog-founder-password.txt
