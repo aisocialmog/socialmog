@@ -34,6 +34,7 @@ await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
 process.env.SUPABASE_URL = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
 process.env.SUPABASE_SERVICE_KEY = 'sb_secret_test';
 process.env.SUPABASE_BUCKET = 'hq';
+process.env.SUPABASE_HANDOVER_MS = '300';
 const cloud = await import('../src/server/cloud.ts');
 const until = async (ok: () => boolean) => {
   for (let i = 0; i < 100 && !ok(); i++) await new Promise((r) => setTimeout(r, 20));
@@ -76,12 +77,24 @@ test('Supabase saving: first start, save, wiped disk restores data and files, ne
   openDb(join(dir3, 'hq.sqlite')).close();
   await assert.rejects(cloud.restoreFromCloud(dir3), /Both this server and Supabase have a database/);
 
-  // Another copy of the app took over (e.g. during a redeploy): this one stops saving and says so.
-  objects.set('db/lease.json', Buffer.from(JSON.stringify({ boot: 'someone-else' })));
-  const before = objects.get('db/hq.sqlite.gz');
-  insert(db2, 'tasks', { title: 'late write' });
+  // Another copy of the app took over (a redeploy): this one saves its last changes once, then stops and refuses changes.
+  objects.set('db/lease.json', Buffer.from(JSON.stringify({ boot: 'newer-copy' })));
+  insert(db2, 'tasks', { title: 'typed during the redeploy' });
   await cloud.saveDatabase(db2);
-  assert.equal(objects.get('db/hq.sqlite.gz'), before);
   assert.ok(cloud.cloudStatus().superseded);
-  assert.match(cloud.cloudStatus().last_error!, /newer copy of the app/);
+  const handedOver = objects.get('db/hq.sqlite.gz');
+  insert(db2, 'tasks', { title: 'too late' });
+  await cloud.saveDatabase(db2);
+  assert.equal(objects.get('db/hq.sqlite.gz'), handedOver, 'no saves after handing over');
+  let status = 0;
+  cloud.refuseWritesWhenSuperseded({ method: 'POST' }, { status: (n) => ((status = n), { json: () => {} }) }, () => {});
+  assert.equal(status, 503, 'changes are refused, not silently dropped');
+
+  // The newer copy waits for that handover before downloading, and gets the record typed during the redeploy.
+  const dir4 = mkdtempSync(join(tmpdir(), 'hq-cloud-'));
+  const started = performance.now();
+  await cloud.restoreFromCloud(dir4);
+  assert.ok(performance.now() - started >= 290, 'waited for the old copy');
+  assert.ok(get(openDb(join(dir4, 'hq.sqlite')), `SELECT 1 FROM tasks WHERE title = 'typed during the redeploy'`));
+  assert.equal(JSON.parse(objects.get('db/lease.json')!.toString()).boot !== 'newer-copy', true, 'took the lease');
 });

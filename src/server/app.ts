@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { isIsoDate } from '../shared/dates.ts';
 import { paiseToRupeesString } from '../shared/money.ts';
 import { can, ENTITIES, ENTITY, fieldLabel, INTERNAL_ROLES, ROLES, type Cap, type Entity, type Role } from '../shared/schema.ts';
-import { cloudStatus, mirrorFile } from './cloud.ts';
+import { cloudStatus, mirrorFile, refuseWritesWhenSuperseded } from './cloud.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, setSetting, tx, update, type Db, type Row, type User } from './db.ts';
 import { afterWrite, beforeWrite, domainRoutes } from './domain.ts';
 import { financeRoutes } from './finance-routes.ts';
@@ -265,6 +265,7 @@ export function createApp(db: Db, opts: AppOptions) {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '5mb' }));
+  app.use('/api', refuseWritesWhenSuperseded);
   app.use((req, res, next) => {
     req.db = db;
     req.user = userFromSession(db, cookie(req, 'hq'));

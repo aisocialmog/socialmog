@@ -15,6 +15,8 @@ if (existsSync('.env')) process.loadEnvFile('.env');
 const production = process.env.NODE_ENV === 'production';
 const dataDir = resolve(process.env.DATA_DIR ?? './data');
 mkdirSync(dataDir, { recursive: true });
+// Render wipes its disk on every restart: without Supabase everything typed in would be lost, so do not start.
+if (process.env.RENDER && !cloudEnabled()) throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY in Render → Environment: its disk is wiped on every restart, so nothing would be kept.');
 // With Supabase set up, the saved database and files come down before anything opens them.
 await restoreFromCloud(dataDir);
 const db = openDb(join(dataDir, 'hq.sqlite'));
@@ -47,6 +49,6 @@ app.use(errorHandler);
 
 startScheduler(db, { dataDir });
 startCloudSync(db);
-if (cloudEnabled) console.log('Saving to Supabase Storage is on.');
+if (cloudEnabled()) console.log('Saving to Supabase Storage is on.');
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => console.log(`Socialmog HQ running on http://localhost:${port}`));
