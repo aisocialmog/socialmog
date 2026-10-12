@@ -254,6 +254,58 @@ function CloudCard() {
   );
 }
 
+/** Import a prepared records file: preview (a trial run, nothing saved), then Import saves it all or nothing. */
+function ImportCard() {
+  const [bundle, setBundle] = useState<Row | null>(null);
+  const [preview, setPreview] = useState<Row | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = async (file: File | undefined) => {
+    setPreview(null);
+    setBundle(null);
+    if (!file) return;
+    let b: Row;
+    try {
+      b = JSON.parse(await file.text());
+    } catch {
+      return toast('That file is not an import file', 'error');
+    }
+    setBusy(true);
+    if (await attempt(async () => setPreview(await api('/api/admin/import-bundle', { body: { bundle: b, apply: false } })))) setBundle(b);
+    setBusy(false);
+  };
+  const apply = async () => {
+    setBusy(true);
+    if (await attempt(() => api('/api/admin/import-bundle', { body: { bundle, apply: true } }), 'Imported')) {
+      setBundle(null);
+      setPreview(null);
+      invalidate();
+    }
+    setBusy(false);
+  };
+  const total = (rows: Row[]) => rows.reduce((s, r) => s + r.outstanding, 0);
+  return (
+    <Card title="Import records" hint="A prepared file of records (for example from the old app). You see exactly what it adds before anything is saved.">
+      <input type="file" accept=".json,application/json" disabled={busy} onChange={(e) => load(e.target.files?.[0])} />
+      {preview && (
+        <div className="stack tight" style={{ marginTop: 12 }}>
+          <p className="small"><b>{preview.source}</b>: nothing is saved yet. After importing, the app would show:</p>
+          <p className="small">{Object.entries(preview.created as Record<string, number>).map(([k, n]) => `${n} ${k.replace(/_/g, ' ')}`).join(' · ')}</p>
+          <p className="small">Cash across accounts <Money p={preview.cash} /> · Owed to us <Money p={total(preview.receivables)} /> · We owe <Money p={total(preview.payables)} /></p>
+          <details><summary className="small">Owed to us ({preview.receivables.length})</summary>
+            <ul className="small">{preview.receivables.map((r: Row, i: number) => <li key={i}>{r.payer}: {r.label}, due {r.due} — <Money p={r.outstanding} /></li>)}</ul>
+          </details>
+          <details><summary className="small">We owe ({preview.payables.length})</summary>
+            <ul className="small">{preview.payables.map((r: Row, i: number) => <li key={i}>{r.payee}: {r.description}, due {r.due} — <Money p={r.outstanding} /></li>)}</ul>
+          </details>
+          {preview.unapplied.length > 0 && <p className="small"><Badge tone="warn">{preview.unapplied.length} payment(s) not applied</Badge> to an invoice or payable</p>}
+          {preview.notes.length > 0 && <details><summary className="small">Decisions in this file</summary><ul className="small">{preview.notes.map((n: string, i: number) => <li key={i}>{n}</li>)}</ul></details>}
+          <div><button className="btn primary" disabled={busy} onClick={apply}>Import</button></div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Data() {
   const me = useMe();
   const [confirm, setConfirm] = useState('');
@@ -268,6 +320,7 @@ function Data() {
           <p className="small muted">Restore: stop the server, replace data/hq.sqlite with a backup file (or unpack the "everything" file into the data folder), start again.</p>
         </Card>
         <CloudCard />
+        <ImportCard />
         <Card title="Demo data" hint={me.demo ? 'Demo records are loaded and marked DEMO.' : 'No demo data loaded.'}>
           {me.demo ? (
             <div className="stack tight">

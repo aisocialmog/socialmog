@@ -6,6 +6,7 @@ import { isIsoDate } from '../shared/dates.ts';
 import { paiseToRupeesString } from '../shared/money.ts';
 import { can, ENTITIES, ENTITY, fieldLabel, INTERNAL_ROLES, ROLES, type Cap, type Entity, type Role } from '../shared/schema.ts';
 import { writeArchive } from './archive.ts';
+import { importBundle } from './bundle.ts';
 import { cloudStatus, mirrorFile, refuseWritesWhenSuperseded } from './cloud.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, setSetting, tx, update, type Db, type Row, type User } from './db.ts';
 import { afterWrite, beforeWrite, domainRoutes } from './domain.ts';
@@ -650,6 +651,12 @@ export function createApp(db: Db, opts: AppOptions) {
       console.error('Download everything', err);
       res.destroy(err as Error);
     }
+  });
+
+  // A prepared file of records (e.g. from the old app): preview is a trial run that is rolled back; apply saves it all or nothing.
+  app.post('/api/admin/import-bundle', (req, res) => {
+    const u = requireCap(req, 'admin');
+    res.json(importBundle(db, u, req.body?.bundle, req.body?.apply === true));
   });
 
   app.get('/api/admin/cloud', (req, res) => {
