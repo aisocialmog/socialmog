@@ -286,7 +286,8 @@ export function createApp(db: Db, opts: AppOptions) {
     if (u?.locked_until && u.locked_until > now.toISOString()) throw new HttpError(429, 'Too many attempts. Try again in 15 minutes.');
     if (!u || u.status !== 'active' || !verifyPassword(String(password ?? ''), u.password_hash)) {
       if (u) {
-        const fails = (u.failed_logins ?? 0) + 1;
+        // A lock that has run out starts the count again, so one more slip does not lock the account straight back.
+        const fails = (u.locked_until ? 0 : u.failed_logins ?? 0) + 1;
         run(db, 'UPDATE users SET failed_logins = ?, locked_until = ? WHERE id = ?', fails, fails >= 5 ? new Date(now.getTime() + 15 * 60_000).toISOString() : null, u.id);
       }
       throw new HttpError(401, 'Email or password is incorrect');

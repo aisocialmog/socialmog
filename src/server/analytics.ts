@@ -331,7 +331,7 @@ const SCOPES = 'instagram_business_basic,instagram_business_manage_insights';
 
 function key(): Buffer {
   const secret = process.env.APP_SECRET;
-  if (!secret || secret.length < 16 || secret.startsWith('change-me')) throw new HttpError(500, 'Set a strong APP_SECRET before connecting accounts (tokens are encrypted with it)');
+  if (!secret || secret.length < 16 || secret.startsWith('change-me')) throw new HttpError(503, 'Set a strong APP_SECRET (16+ random characters) in the server settings before connecting accounts (tokens are encrypted with it)');
   return createHash('sha256').update(secret).digest();
 }
 export function encrypt(plain: string): string {

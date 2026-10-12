@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import { createApp, errorHandler, hashPassword } from '../src/server/app.ts';
-import { get, insert, openDb } from '../src/server/db.ts';
+import { get, insert, openDb, run } from '../src/server/db.ts';
 import { DEMO_PASSWORD, seedDemo } from '../src/server/seed.ts';
 
 process.env.HQ_TODAY = '2026-10-07';
@@ -110,6 +110,10 @@ test('login lockout after repeated failures', async () => {
   for (let i = 0; i < 5; i++) {
     await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hq': '1' }, body: JSON.stringify({ email: 'meera@demo.socialmog.in', password: 'wrong' }) });
   }
-  const res = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hq': '1' }, body: JSON.stringify({ email: 'meera@demo.socialmog.in', password: DEMO_PASSWORD }) });
-  assert.equal(res.status, 429);
+  const attempt = (password: string) => fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-hq': '1' }, body: JSON.stringify({ email: 'meera@demo.socialmog.in', password }) });
+  assert.equal((await attempt(DEMO_PASSWORD)).status, 429);
+  // Once the 15 minutes are up, one more typo is just a wrong password, not another lock.
+  run(db, `UPDATE users SET locked_until = ? WHERE email = 'meera@demo.socialmog.in'`, new Date(Date.now() - 1000).toISOString());
+  assert.equal((await attempt('wrong again')).status, 401);
+  assert.equal((await attempt(DEMO_PASSWORD)).status, 200);
 });
