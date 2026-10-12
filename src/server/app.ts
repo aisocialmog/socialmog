@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { isIsoDate } from '../shared/dates.ts';
 import { paiseToRupeesString } from '../shared/money.ts';
 import { can, ENTITIES, ENTITY, fieldLabel, INTERNAL_ROLES, ROLES, type Cap, type Entity, type Role } from '../shared/schema.ts';
+import { cloudStatus, mirrorFile } from './cloud.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, setSetting, tx, update, type Db, type Row, type User } from './db.ts';
 import { afterWrite, beforeWrite, domainRoutes } from './domain.ts';
 import { financeRoutes } from './finance-routes.ts';
@@ -571,6 +572,7 @@ export function createApp(db: Db, opts: AppOptions) {
     const name = String(req.headers['x-filename'] ?? 'file').replace(/[^\w.\- ]/g, '_').slice(0, 120);
     const stored = `${doc.id}-${Date.now()}-${name}`;
     writeFileSync(join(uploadsDir, stored), body);
+    mirrorFile(`uploads/${stored}`);
     update(db, 'documents', doc.id, { file: stored, mime, size: body.length });
     audit(db, u.id, 'upload', 'documents', doc.id, null, { file: stored, size: body.length, sha256: createHash('sha256').update(body).digest('hex') });
     res.json({ ok: true });
@@ -631,6 +633,11 @@ export function createApp(db: Db, opts: AppOptions) {
     audit(db, u.id, 'backup', 'system', null, null, { file });
     res.setHeader('Content-Disposition', `attachment; filename="socialmog-hq-backup.sqlite"`);
     res.send(readFileSync(file));
+  });
+
+  app.get('/api/admin/cloud', (req, res) => {
+    requireCap(req, 'admin');
+    res.json(cloudStatus());
   });
 
   app.get('/api/admin/export.json', (req, res) => {

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createApp, errorHandler, hashPassword } from './app.ts';
 import { get, getSetting, insert, openDb } from './db.ts';
+import { cloudEnabled, restoreFromCloud, startCloudSync } from './cloud.ts';
 import { backfillTdsCredits } from './finance.ts';
 import { startScheduler } from './jobs.ts';
 import { seedDemo } from './seed.ts';
@@ -14,6 +15,8 @@ if (existsSync('.env')) process.loadEnvFile('.env');
 const production = process.env.NODE_ENV === 'production';
 const dataDir = resolve(process.env.DATA_DIR ?? './data');
 mkdirSync(dataDir, { recursive: true });
+// With Supabase set up, the saved database and files come down before anything opens them.
+await restoreFromCloud(dataDir);
 const db = openDb(join(dataDir, 'hq.sqlite'));
 
 if (!get(db, 'SELECT id FROM users LIMIT 1')) {
@@ -43,5 +46,7 @@ if (production) {
 app.use(errorHandler);
 
 startScheduler(db, { dataDir });
+startCloudSync(db);
+if (cloudEnabled) console.log('Saving to Supabase Storage is on.');
 const port = Number(process.env.PORT ?? 4000);
 app.listen(port, () => console.log(`Socialmog HQ running on http://localhost:${port}`));

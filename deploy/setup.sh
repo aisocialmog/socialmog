@@ -75,13 +75,18 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
 PORT=4000
 DATA_DIR=$DATA_DIR
 APP_BASE_URL=https://$DOMAIN
-APP_SECRET=$(openssl rand -hex 32)
+APP_SECRET=${APP_SECRET:-$(openssl rand -hex 32)}
 FOUNDER_EMAIL=$FOUNDER_EMAIL
 FOUNDER_PASSWORD=$FOUNDER_PASSWORD
 FOUNDER_NAME=Founder
 SEED_DEMO=0
 COOKIE_SECURE=1
 ENV
+  # Moving from the free Render + Supabase setup: the first start brings the database and files down from Supabase,
+  # and the server keeps saving there afterwards (a free off-site copy).
+  if [[ -n "${SUPABASE_URL:-}" && -n "${SUPABASE_SERVICE_KEY:-}" ]]; then
+    printf 'SUPABASE_URL=%s\nSUPABASE_SERVICE_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_SERVICE_KEY" >> "$APP_DIR/.env"
+  fi
   chown "$APP_USER:$APP_USER" "$APP_DIR/.env"; chmod 600 "$APP_DIR/.env"
   echo "$FOUNDER_PASSWORD" > /root/socialmog-founder-password.txt; chmod 600 /root/socialmog-founder-password.txt
 fi
@@ -122,7 +127,10 @@ sleep 3
 systemctl is-active --quiet socialmoghq && echo "App is running." || { echo "App failed to start. See: journalctl -u socialmoghq -n 50"; exit 1; }
 echo
 echo "Done. Open https://$DOMAIN in a few minutes (HTTPS appears once your domain points at this server)."
-if [[ -f /root/socialmog-founder-password.txt ]]; then
+if grep -q '^SUPABASE_URL=' "$APP_DIR/.env"; then
+  echo "Data comes from Supabase: sign in with the same logins as before. Check Settings > Data & backups > Saved to Supabase."
+  rm -f /root/socialmog-founder-password.txt
+elif [[ -f /root/socialmog-founder-password.txt ]]; then
   echo "Sign in as $FOUNDER_EMAIL with password: $(cat /root/socialmog-founder-password.txt)"
   echo "Change it straight away under Settings > My account, then run: sudo rm /root/socialmog-founder-password.txt"
 fi

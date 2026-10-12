@@ -236,6 +236,24 @@ function Automation() {
   );
 }
 
+/** Shows only what actually happened: the time of the last successful save to Supabase, or the error. */
+function CloudCard() {
+  const q = useApi<Row>('/api/admin/cloud');
+  return (
+    <Async q={q}>
+      {(c) =>
+        c.enabled ? (
+          <Card title="Saved to Supabase" hint={`Every change is copied to the private Supabase bucket "${c.bucket}" within about 15 seconds.`} actions={<button className="btn" onClick={q.reload}>Refresh</button>}>
+            <p className="small">{c.last_saved_at ? <>Last saved: {fmtDateTime(c.last_saved_at)}</> : 'Not saved yet since the app started.'}</p>
+            {c.files_not_copied > 0 && <p className="small"><Badge tone="warn">{c.files_not_copied} file(s) not copied yet</Badge> retried every 15 seconds</p>}
+            {c.last_error && <p className="small"><Badge tone="bad">Not saving</Badge> {c.last_error}</p>}
+          </Card>
+        ) : null
+      }
+    </Async>
+  );
+}
+
 function Data() {
   const me = useMe();
   const [confirm, setConfirm] = useState('');
@@ -247,6 +265,7 @@ function Data() {
           <div className="row"><a className="btn" href="/api/admin/backup">Download database backup</a><a className="btn" href="/api/admin/export.json">Export all records (JSON)</a></div>
           <p className="small muted" style={{ marginTop: 8 }}>Restore: stop the server, replace data/hq.sqlite with a backup file, start again.</p>
         </Card>
+        <CloudCard />
         <Card title="Demo data" hint={me.demo ? 'Demo records are loaded and marked DEMO.' : 'No demo data loaded.'}>
           {me.demo ? (
             <div className="stack tight">

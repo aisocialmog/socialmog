@@ -12,6 +12,7 @@ import { formatINR, formatNumberIN, paiseToRupeesString } from '../shared/money.
 import { barChart, lineChart, SERIES_LIGHT, THEME_PRINT } from '../shared/charts.ts';
 import { dealEconomics } from '../shared/calc.ts';
 import { can, humanize, type Cap } from '../shared/schema.ts';
+import { mirrorFile } from './cloud.ts';
 import { all, audit, decode, get, getSetting, HttpError, insert, run, update, type Db, type Row, type User } from './db.ts';
 import { founders, notify, requireUser, toCsv } from './app.ts';
 import { accountBalances, ageing, campaignFinancials, cashflowByPeriod, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, tdsRegister, today } from './finance.ts';
@@ -749,6 +750,8 @@ export async function produce(db: Db, dataDir: string, runId: number): Promise<v
     writeFileSync(join(dir, `${base}.pdf`), pdf);
     const csv = built.csv.map((t2) => `${t2.name}\r\n${toCsv(t2.rows, t2.columns.map((c) => ({ key: c.key, label: c.label, type: c.money ? 'money' : undefined })))}`).join('\r\n\r\n');
     writeFileSync(join(dir, `${base}.csv`), `﻿${csv}`);
+    mirrorFile(`reports/${base}.pdf`);
+    mirrorFile(`reports/${base}.csv`);
     const snapshot = JSON.stringify(built.data);
     update(db, 'report_runs', runId, { status: 'completed', progress: 100, file: `${base}.pdf`, csv_file: `${base}.csv`, title: built.title, snapshot: snapshot.length < 500_000 ? built.data : { note: 'Snapshot too large to archive inline' }, finished_at: new Date().toISOString() });
     if (user) notify(db, [user.id], { kind: 'report', title: `Report ready: ${built.title}`, link: `/reports/${runId}`, dedupe: `report:${runId}` });

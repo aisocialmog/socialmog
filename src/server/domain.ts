@@ -11,6 +11,7 @@ import { addDays, diffDays, financialYearStart, formatDate, weekStart } from '..
 import { dealEconomics, mean, median, pctChange, STAGE_PROBABILITY } from '../shared/calc.ts';
 import { formatINR, splitProportional } from '../shared/money.ts';
 import { can, CAMPAIGN_STAGES, CONTENT_STAGES, ENTITY } from '../shared/schema.ts';
+import { mirrorFile, unmirrorFile } from './cloud.ts';
 import { all, audit, decode, get, HttpError, insert, run, tx, update, type Db, type Row, type User } from './db.ts';
 import { attachLabels, founders, notify, requireCap, requireInternal, requireUser, scopeFor, serialize, type AppOptions } from './app.ts';
 import { campaignFinancials, cashPosition, earnings, forecastInputs, listInvoices, listObligations, payeeStatement, today } from './finance.ts';
@@ -736,9 +737,13 @@ export function domainRoutes(app: Express, opts: AppOptions) {
     // Checks the bytes (not the declared type) and strips location/device metadata before anything is stored.
     const { bytes, ext } = safePhoto(body);
     mkdirSync(photoDir, { recursive: true });
-    if (inf.photo_file) rmSync(join(photoDir, inf.photo_file), { force: true });
+    if (inf.photo_file) {
+      rmSync(join(photoDir, inf.photo_file), { force: true });
+      unmirrorFile(`uploads/photos/${inf.photo_file}`);
+    }
     const file = `influencer-${inf.id}-${Date.now()}.${ext}`;
     writeFileSync(join(photoDir, file), bytes);
+    mirrorFile(`uploads/photos/${file}`);
     update(req.db, 'influencers', inf.id, { photo_file: file });
     audit(req.db, u.id, 'upload', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: file, size: bytes.length });
     res.json({ ok: true });
@@ -748,7 +753,10 @@ export function domainRoutes(app: Express, opts: AppOptions) {
     const u = requireCap(req, 'talent');
     const inf = get(req.db, 'SELECT * FROM influencers WHERE id = ?', Number(req.params.id));
     if (!inf) throw new HttpError(404, 'Creator not found');
-    if (inf.photo_file) rmSync(join(photoDir, inf.photo_file), { force: true });
+    if (inf.photo_file) {
+      rmSync(join(photoDir, inf.photo_file), { force: true });
+      unmirrorFile(`uploads/photos/${inf.photo_file}`);
+    }
     update(req.db, 'influencers', inf.id, { photo_file: null });
     audit(req.db, u.id, 'delete', 'influencers', inf.id, { photo_file: inf.photo_file }, { photo_file: null });
     res.json({ ok: true });

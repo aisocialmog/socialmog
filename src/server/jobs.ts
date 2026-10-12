@@ -6,6 +6,7 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { partsInTz, weekStart } from '../shared/dates.ts';
+import { mirrorBackup } from './cloud.ts';
 import { all, get, getSetting, insert, run, type Db, type Row } from './db.ts';
 import { founders, notify } from './app.ts';
 import { dashboard } from './domain.ts';
@@ -81,6 +82,7 @@ registerJob('backup', (db, payload) => {
   const file = join(dir, `daily-${new Date().toISOString().slice(0, 10)}.sqlite`);
   rmSync(file, { force: true });
   db.exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  mirrorBackup(`backups/${file.split('/').at(-1)}`);
   const daily = readdirSync(dir).filter((f) => f.startsWith('daily-')).sort();
   for (const old of daily.slice(0, Math.max(0, daily.length - 14))) rmSync(join(dir, old));
 });
