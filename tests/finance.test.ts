@@ -96,6 +96,11 @@ test('payout with TDS deduction creates a tax payable; recurring payable rolls f
   const tax = get(db, `SELECT * FROM obligations WHERE category = 'tax'`)!;
   assert.equal(tax.amount, L(2_000));
   assert.equal(tax.due_date, '2026-11-07');
+  // March deductions are due on 30 April, not 7 April.
+  const old = insert(db, 'accounts', { name: 'Old bank', type: 'bank', opening_balance: L(50_000), opening_date: '2026-01-01', active: 1 });
+  const ob2 = insert(db, 'obligations', { description: 'March reel', category: 'creator_payout', payee_type: 'influencer', influencer_id: creator, amount: L(10_000), due_date: '2026-03-20', status: 'committed', repeat: 'none' });
+  recordTransaction(db, user, { account_id: old, txn_date: '2026-03-20', direction: 'out', amount: L(9_000), category: 'creator_payout', reference: 'P-MAR', allocations: [{ obligation_id: ob2, amount: L(9_000), tds: L(1_000) }] });
+  assert.equal(get(db, `SELECT due_date FROM obligations WHERE description = 'TDS deducted: March reel'`)!.due_date, '2026-04-30');
 
   const rent = insert(db, 'obligations', { description: 'Studio rent', category: 'rent', payee_type: 'other', payee_name: 'Landlord', amount: L(15_000), due_date: '2026-10-05', status: 'committed', repeat: 'monthly' });
   recordTransaction(db, user, { account_id: bank, txn_date: '2026-10-06', direction: 'out', amount: L(15_000), category: 'operating_expense', reference: 'R1', allocations: [{ obligation_id: rent, amount: L(15_000) }] });

@@ -285,8 +285,8 @@ export function allocate(db: Db, user: User, transactionId: number, allocations:
 }
 
 function createTdsPayable(db: Db, user: User, ob: Row, amount: Paise, date: string, settlementId: number) {
-  // TDS deducted from a payout must be deposited with the government by the 7th of the next month.
-  const due = addDays(addMonths(monthStart(date), 1), 6);
+  // TDS deducted from a payout must be deposited by the 7th of the next month (30 April for March deductions).
+  const due = date.slice(5, 7) === '03' ? `${date.slice(0, 4)}-04-30` : addDays(addMonths(monthStart(date), 1), 6);
   insert(db, 'obligations', {
     description: `TDS deducted: ${ob.description}`,
     category: 'tax',
