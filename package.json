@@ -5,7 +5,7 @@
   "description": "Socialmog HQ — internal agency operating system for Socialmog (influencer marketing & content agency).",
   "type": "module",
   "engines": {
-    "node": ">=22.18"
+    "node": "^22.18.0"
   },
   "scripts": {
     "dev": "node --watch-path=src/server --watch-path=src/shared --no-warnings=ExperimentalWarning src/server/index.ts",

@@ -13,10 +13,12 @@ import { ENTITIES } from '../shared/schema.ts';
 if (existsSync('.env')) process.loadEnvFile('.env');
 
 const production = process.env.NODE_ENV === 'production';
-const dataDir = resolve(process.env.DATA_DIR ?? './data');
+// On Railway with a volume attached, data lives on the volume.
+const dataDir = resolve(process.env.DATA_DIR ?? process.env.RAILWAY_VOLUME_MOUNT_PATH ?? './data');
 mkdirSync(dataDir, { recursive: true });
-// Render wipes its disk on every restart: without Supabase everything typed in would be lost, so do not start.
-if (process.env.RENDER && !cloudEnabled()) throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY in Render → Environment: its disk is wiped on every restart, so nothing would be kept.');
+// Render (and Railway without a volume) wipe the disk on every restart: without Supabase everything typed in would be lost.
+const wiped = process.env.RENDER || (process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_VOLUME_MOUNT_PATH && !process.env.DATA_DIR);
+if (wiped && !cloudEnabled()) throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY (or attach a volume on Railway): this host wipes its disk on every restart, so nothing would be kept.');
 // With Supabase set up, the saved database and files come down before anything opens them.
 await restoreFromCloud(dataDir);
 const db = openDb(join(dataDir, 'hq.sqlite'));
