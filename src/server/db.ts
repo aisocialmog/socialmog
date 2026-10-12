@@ -77,20 +77,22 @@ export function run(db: Db, sql: string, ...params: any[]) {
 }
 
 let depth = 0;
-/** Run fn in a transaction (nested calls use savepoints). */
+/** Run fn in a transaction (nested calls use savepoints). A failed COMMIT (e.g. a deferred foreign key) rolls back too. */
 export function tx<T>(db: Db, fn: () => T): T {
+  const outer = depth === 0;
   const sp = `sp${depth}`;
-  db.exec(depth === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${sp}`);
+  db.exec(outer ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${sp}`);
   depth++;
   try {
     const out = fn();
-    depth--;
-    db.exec(depth === 0 ? 'COMMIT' : `RELEASE ${sp}`);
+    db.exec(outer ? 'COMMIT' : `RELEASE ${sp}`);
     return out;
   } catch (err) {
-    depth--;
-    db.exec(depth === 0 ? 'ROLLBACK' : `ROLLBACK TO ${sp}; RELEASE ${sp}`);
+    if (!outer) db.exec(`ROLLBACK TO ${sp}; RELEASE ${sp}`);
+    else if (db.isTransaction) db.exec('ROLLBACK');
     throw err;
+  } finally {
+    depth--;
   }
 }
 

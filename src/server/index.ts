@@ -7,6 +7,7 @@ import { get, getSetting, insert, openDb } from './db.ts';
 import { backfillTdsCredits } from './finance.ts';
 import { startScheduler } from './jobs.ts';
 import { seedDemo } from './seed.ts';
+import { ENTITIES } from '../shared/schema.ts';
 
 if (existsSync('.env')) process.loadEnvFile('.env');
 
@@ -21,7 +22,12 @@ if (!get(db, 'SELECT id FROM users LIMIT 1')) {
   insert(db, 'users', { name: process.env.FOUNDER_NAME || 'Founder', email, role: 'founder', status: 'active', password_hash: hashPassword(password) });
   console.log(`\nCreated founder account: ${email}${process.env.FOUNDER_PASSWORD ? '' : `  password: ${password}  (change it in Settings)`}\n`);
 }
-if (process.env.SEED_DEMO !== '0' && !getSetting(db, 'demo_seeded', false)) seedDemo(db);
+// Demo data only ever goes into a brand-new database (the founder login at most), never one holding real records.
+if (process.env.SEED_DEMO !== '0' && !getSetting(db, 'demo_seeded', false)) {
+  const fresh = get(db, 'SELECT COUNT(*) n FROM users')!.n <= 1 && ENTITIES.every((e) => e.key === 'users' || !get(db, `SELECT 1 FROM ${e.key} LIMIT 1`));
+  if (fresh) seedDemo(db);
+  else console.log('Demo data not loaded: this database already has records. Set SEED_DEMO=0 to hide this message.');
+}
 backfillTdsCredits(db);
 
 const app = createApp(db, { dataDir, production });

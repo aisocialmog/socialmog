@@ -5,7 +5,7 @@
  */
 import { addDays, weekStart } from '../shared/dates.ts';
 import { ENTITIES } from '../shared/schema.ts';
-import { all, get, insert, run, setSetting, tx, type Db, type Row, type User } from './db.ts';
+import { all, get, HttpError, insert, run, setSetting, tx, type Db, type Row, type User } from './db.ts';
 import { hashPassword } from './app.ts';
 import { afterWrite, convertDeal } from './domain.ts';
 import { createEarmark, importTransactions, recordTransaction, recordTransfer, today } from './finance.ts';
@@ -305,6 +305,13 @@ export function removeDemo(db: Db): Row {
     if (demoInv.length) run(db, `DELETE FROM settlements WHERE invoice_id IN (${demoInv.join(',')})`);
     const demoOb = all(db, 'SELECT id FROM obligations WHERE is_demo = 1').map((r) => r.id);
     if (demoOb.length) run(db, `DELETE FROM settlements WHERE obligation_id IN (${demoOb.join(',')})`);
+    // What the app generated for demo creators after seeding (weekly reports, snapshots, posts, connections) goes with them.
+    for (const t of ['weekly_reports', 'analytics_snapshots', 'posts', 'social_accounts']) run(db, `UPDATE ${t} SET is_demo = 1 WHERE influencer_id IN (SELECT id FROM influencers WHERE is_demo = 1)`);
+    // TDS register rows hang off demo invoices and receipts (some were added by the start-up backfill, unflagged).
+    const ids = (sql: string) => all(db, sql).map((r) => r.id).join(',') || 'NULL';
+    const demoSettlements = ids(`SELECT id FROM settlements WHERE is_demo = 1 OR transaction_id IN (SELECT id FROM transactions WHERE is_demo = 1) OR invoice_id IN (SELECT id FROM invoices WHERE is_demo = 1) OR obligation_id IN (SELECT id FROM obligations WHERE is_demo = 1)`);
+    counts.tds_credits = Number(run(db, `DELETE FROM tds_credits WHERE is_demo = 1 OR settlement_id IN (${demoSettlements}) OR creator_settlement_id IN (${demoSettlements})
+      OR invoice_id IN (SELECT id FROM invoices WHERE is_demo = 1) OR obligation_id IN (SELECT id FROM obligations WHERE is_demo = 1) OR influencer_id IN (SELECT id FROM influencers WHERE is_demo = 1)`).changes);
     const demoUsers = all(db, 'SELECT id FROM users WHERE is_demo = 1').map((r) => r.id);
     if (demoUsers.length) {
       run(db, `DELETE FROM sessions WHERE user_id IN (${demoUsers.join(',')})`);
@@ -312,6 +319,9 @@ export function removeDemo(db: Db): Row {
     }
     for (const t of order) counts[t] = Number(run(db, `DELETE FROM ${t} WHERE is_demo = 1`).changes);
     counts.users = Number(run(db, 'DELETE FROM users WHERE is_demo = 1').changes);
+    // Real records still pointing at demo ones (a real deliverable on a demo campaign…) block the removal, with a reason.
+    const broken = all(db, 'PRAGMA foreign_key_check');
+    if (broken.length) throw new HttpError(409, `Some real records still point at demo data (${[...new Set(broken.map((b) => `${b.table} → ${b.parent}`))].join(', ')}). Move them to real records first; nothing was removed.`);
     setSetting(db, 'demo_loaded', false);
   });
   return counts;

@@ -675,7 +675,18 @@ export function createApp(db: Db, opts: AppOptions) {
   return app;
 }
 
+/** "UNIQUE constraint failed: campaign_creators.campaign_id, campaign_creators.influencer_id" → a plain duplicate message. */
+function duplicateMessage(err: any): string | null {
+  const m = /UNIQUE constraint failed: (\w+)\.(.+)$/.exec(String(err?.message ?? ''));
+  const e = m && ENTITY[m[1]];
+  if (!e) return null;
+  const cols = m[2].split(', ').map((c) => c.split('.').at(-1)!).filter((c) => c !== 'archived_at');
+  return `That already exists: another ${e.label.toLowerCase()} has the same ${cols.map((c) => (e.fields.find((f) => f.key === c)?.label ?? c.replace(/_id$/, '').replace(/_/g, ' ')).toLowerCase()).join(' and ')} (archived records count too). Nothing was saved.`;
+}
+
 export function errorHandler(err: any, req: Request, res: Response, _next: NextFunction) {
+  const dup = err instanceof HttpError ? null : duplicateMessage(err);
+  if (dup) err = new HttpError(409, dup);
   const status = err instanceof HttpError ? err.status : err?.type === 'entity.too.large' ? 413 : err?.type === 'entity.parse.failed' ? 400 : 500;
   if (status === 500) console.error(`[${req.method} ${req.path}]`, err);
   const message = status === 500 ? 'Something went wrong on the server. Nothing was saved.' : err.message;
