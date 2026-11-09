@@ -106,3 +106,17 @@ h1, h2, h3, .font-mincho { font-family: 'Shippori Mincho', serif; letter-spacing
 
 /* thin scrollbars that match */
 * { scrollbar-width: thin; scrollbar-color: rgb(var(--line) / .4) transparent; }
+
+/* ─── Print: only the report paper, A4, real colours ─────────── */
+@page { size: A4; margin: 12mm; }
+@media print {
+  html, body { background: #F7F1E6 !important; background-image: none !important; }
+  body * { visibility: hidden; }
+  .report-paper, .report-paper * { visibility: visible; }
+  .report-paper { position: absolute; left: 0; top: 0; width: 100%; max-width: none !important; margin: 0 !important;
+    box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; }
+  .no-print { display: none !important; }
+  .report-paper, .print-color { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .break-inside-avoid { break-inside: avoid; }
+  a { text-decoration: none; }
+}

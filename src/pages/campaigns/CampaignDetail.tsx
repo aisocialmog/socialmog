@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { campaignsApi, type CampaignRecord, type CampaignSummary } from '../../data/campaigns'
 import { useAsync } from '../../hooks/useAsync'
 import { useAuth } from '../../lib/auth'
@@ -31,6 +31,7 @@ export function CampaignDetail() {
   const { id = '' } = useParams()
   const { role } = useAuth()
   const staff = isStaff(role)
+  const nav = useNavigate()
   const [params, setParams] = useSearchParams()
   const tabs = TABS.filter(t => !('staffOnly' in t) || staff)
   const tab = (tabs.find(t => t.key === params.get('tab'))?.key ?? 'overview') as TabKey
@@ -68,7 +69,7 @@ export function CampaignDetail() {
         <div className="flex items-center gap-1">
           <Link to={`/campaigns/${s.campaign_id}/report`} className="btn-primary"><Icon name="download" /> Report</Link>
           {staff && <MoreMenu items={[
-            { label: 'Edit campaign & budget', onSelect: () => { window.location.assign(`/campaigns/${s.campaign_id}/edit`) } },
+            { label: 'Edit campaign & budget', onSelect: () => nav(`/campaigns/${s.campaign_id}/edit`) },
             ...CAMPAIGN_STATUSES.filter(x => x !== s.status).map(x => ({ label: `Move to ${CAMPAIGN_STATUS_LABEL[x]}`, onSelect: () => act(() => campaignsApi.setStatus(s.campaign_id, x)) })),
             s.is_archived ? { label: 'Restore campaign', onSelect: () => act(() => campaignsApi.setArchived(s.campaign_id, false)) }
               : { label: 'Archive campaign', danger: true, onSelect: () => { if (confirm(`Archive ${s.name}? Nothing is deleted.`)) act(() => campaignsApi.setArchived(s.campaign_id, true)) } },

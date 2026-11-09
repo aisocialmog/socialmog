@@ -3,7 +3,7 @@
 Internal database and management site for **Social Mog**, an influencer production and campaign agency in India.
 It keeps brands, creators, campaigns, production, tasks and money in one place, and calculates every total from the records.
 
-**Status:** features 1 (login, roles, layout, activity log), 2 (Brands) and 3 (Creators) are built. The database schema for every later feature is already in place.
+**Status:** features 1 (login, roles, layout, activity log), 2 (Brands), 3 (Creators) and 4 (Campaigns) are built. The database schema for every later feature is already in place.
 
 ![Dashboard shell](docs/preview/dashboard-founder.png)
 
@@ -92,6 +92,24 @@ The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quar
 ### Sample creators
 - **Add them:** run `supabase/samples/sample_creators.sql` in Supabase → SQL Editor. This adds 5 creators, one in each tier from Nano to Mega. One is blacklisted, and two are in Ranchi.
 - **Remove them:** run `supabase/samples/remove_sample_creators.sql`. It refuses to run if a sample creator has since been put on a campaign or payout.
+
+## Campaigns (feature 4)
+
+- **List and board:** a list view and a board with columns Planning → Creator outreach → Shoot/production → Content review → Live → Reporting → Completed / Cancelled. You drag campaigns between columns to change status, as on the brand pipeline (both use the shared `Kanban` component).
+- **Campaign detail:** tabs for Overview, Brief (with promo codes), Creators, Deliverables, Performance, Money (founders and managers only), Files and Activity.
+  - **Creators tab:** status and fee are edited inline. "Plan deliverables" (e.g. 2 Reels + 3 Stories) creates or cancels the matching tracker rows through `set_creator_deliverables()`.
+  - **Deliverables tab:** draft link, brand approval (shows the 承 seal), live link, go-live date, and "Mark posted", which won't work without the live link. A red lantern warning shows when a go-live date has passed and the post isn't marked Posted.
+- **Calculated numbers** in `campaign_summary` and `deliverable_performance`:
+  - Expected margin = client budget − planned creator spend − planned production spend.
+  - Actual creator spend = the fees of creators who are Confirmed or further along.
+  - Profit = client billing − creator payouts − production expenses linked to the campaign.
+  - Engagement rate = (likes + comments + shares + saves) ÷ views.
+  - Cost per view = cost ÷ views.
+- **Report page** (`/campaigns/<id>/report`): "Download PDF report" opens the browser's Save-as-PDF on an A4 sheet. It shows the logos, results, charts, top posts and a per-creator table. Margin, profit and creator fees appear only in the on-screen internal panel and are never printed. The cost per view in the PDF uses the brand's own investment. See `docs/preview/campaign-report-sample.pdf`.
+
+### Sample campaign
+- **Add it:** run `supabase/samples/sample_campaign.sql`, after the sample brands and creators scripts.
+- **Remove it:** run `supabase/samples/remove_sample_campaign.sql` before removing the sample brands or creators.
 
 ## Setting it up
 

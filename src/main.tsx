@@ -16,6 +16,10 @@ import { CreatorDetail } from './pages/creators/CreatorDetail'
 import { CreatorForm } from './pages/creators/CreatorForm'
 import { CreatorImport } from './pages/creators/CreatorImport'
 import { ShortlistDetail, ShortlistsPage } from './pages/creators/Shortlists'
+import { CampaignsPage } from './pages/campaigns/CampaignsPage'
+import { CampaignDetail } from './pages/campaigns/CampaignDetail'
+import { CampaignForm } from './pages/campaigns/CampaignForm'
+import { CampaignReport } from './pages/campaigns/CampaignReport'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -55,7 +59,12 @@ function Protected() {
           <Route path="/creators/shortlists/:id" element={<ShortlistDetail />} />
           <Route path="/creators/:id" element={<CreatorDetail />} />
           <Route path="/creators/:id/edit" element={<CreatorForm />} />
-          {NAV.filter(n => !['/', '/settings', '/brands', '/creators'].includes(n.to)).map(n => (
+          <Route path="/campaigns" element={<CampaignsPage />} />
+          <Route path="/campaigns/new" element={<CampaignForm />} />
+          <Route path="/campaigns/:id" element={<CampaignDetail />} />
+          <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
+          <Route path="/campaigns/:id/report" element={<CampaignReport />} />
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />
