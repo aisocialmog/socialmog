@@ -128,6 +128,29 @@ The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quar
 - **Content calendar** (`/calendar`): month and week views, colour-coded by brand. Each brand keeps a fixed colour slot from creation (`brands.calendar_color`). Drag a post or shoot with the mouse to reschedule it.
 - **Client calendar link:** "Share with client" creates a read-only link, `/share/calendar/<token>`. Only a SHA-256 of the token is stored, and the link can expire or be turned off. The public function returns titles, formats, dates, a simple status and live links — never money, briefs, notes, people or locations.
 
+## Money (feature 6)
+
+Founders see everything. Managers see invoices, payments, expenses, payouts and account balances — never capital entries or founder withdrawals (RLS: `capital_entries` is founder-only; `capital_accounts()` and `balance_check()` refuse non-founders).
+
+- **Accounts:** bank / UPI / cash / wallet, each with an opening balance and date. Balance = opening + money in − money out (`account_balances()`, `account_statement()`). Only founders set opening balances.
+- **Invoices:**
+  - Numbered `SM/26-27/001` when sent, restarting each financial year of the invoice date. Drafts have no number, so there are no gaps; cancelled invoices keep theirs.
+  - GST on/off with a rate (default 18%): CGST + SGST when the brand's GST state matches ours (`org_settings.state_code`), otherwise IGST. TDS expected % shows "net payable".
+  - Status is calculated: Draft, Sent, Partly paid, Paid, Overdue (past due date), Cancelled.
+  - The detail page is the invoice itself; **PDF** prints only the paper, with logo, GSTINs, bank details, amount in words and a UPI QR for the amount still due.
+  - Retainers: one click creates this month's draft from the retainer (on the Money overview and the brand's Invoices tab); one per brand-month.
+- **Payments:** one payment can settle several invoices (`record_payment()`), with the TDS the brand kept. Anything not applied stays as an advance. "Other income" has no invoice.
+- **Expenses:** your category list (editable in Money → Settings; each counts as a direct cost, an overhead, or a GST / TDS payment), paid-from account, links to brand / campaign / production item, bill photo, GST input. Recurring expenses create themselves each month (pg_cron daily at 06:00 IST where available, and whenever the Expenses page opens).
+- **Payouts:** for a creator (via the campaign) or a freelancer/vendor (often a production item). Pending → Approved → Paid; TDS % and net payable are calculated. Paying one creates its expense automatically; un-paying or cancelling archives it. **Payouts due** groups what's owed by person, with UPI IDs for founders.
+- **Capital:** Opening capital, Capital added, Founder withdrawal, Profit transferred, per founder or "Company" (split by `team_members.profit_share_pct`, 50:50 to start).
+- **Balance check:** capital + retained profit must equal money in accounts + owed to us (unpaid invoices, TDS clients deducted) − what we owe (payouts, unpaid expenses, unapplied advances, GST payable, TDS to deposit). A difference is shown as a likely missing entry.
+- **Overview & reports:** revenue invoiced, cash received, expenses, creator payouts, gross and net profit (invoice basis by default, payments basis on a toggle), receivables ageing 0–30 / 31–60 / 60+ days since the invoice date, payouts pending, balances, capital per founder; profit by brand and by campaign; GST by month and an invoice-wise GST list; TDS by month and line by line — all with CSV export.
+- **Rules:**
+  - Totals come from views (`invoice_totals`, `payment_list`, `expense_list`, `payout_list`, `pnl_lines`, `money_overview()` …). Amounts on lines are generated columns.
+  - Editing or archiving a sent invoice, payment, expense, payout, capital entry or account balance needs a reason. Send it as `change_reason` with the update; the database refuses the change without one and writes it to `activity_log.reason`. Drafts and normal steps (send, approve, pay, mark paid) don't need one.
+  - Money rows can't be hard-deleted, even by the database owner. The sample-removal scripts are the one exception, using `app.allow_money_delete`.
+- `src/lib/money.ts` repeats the same sums for the preview; `tests/money.test.ts` runs the SQL test's scenario through it and expects the same numbers.
+
 ## Setting it up
 
 1. **Founders:** put both founder names and emails in `supabase/migrations/20261109000800_seed_founders.sql`. The push stops with an error while the placeholders are still there.
@@ -142,14 +165,15 @@ The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quar
 
    The service-role key is provided to the function automatically; it never goes in the app.
 5. **First logins:** invite both founder emails once from the dashboard (Authentication → Users → Invite user). Their logins link to the seeded rows. From then on, founders invite everyone from **Settings → Team**.
-6. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
+6. **Money settings:** in the app, Money → Settings — our GST state, GSTIN (or leave blank), legal name, address, bank details, UPI ID and logo. Add each account's opening balance and the matching opening capital so the balance check is green.
+7. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
 
 ```bash
 npm install
 npm run dev                  # http://localhost:5173
 npm test                     # ₹ format, IST dates, FY periods, CSV, role → page map, tab bar
 npm run check:contrast       # WCAG AA check of every colour pair
-npm run test:db              # migrations + role/RLS and brands checks on a local Postgres
+npm run test:db              # migrations + role/RLS, brands, creators, campaigns, production and money checks
 ```
 
 Without Supabase settings, `npm run dev` shows a local-only design preview on the login page, so you can look around as each role. That preview is never included in a production build.

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { productionApi, type ItemInput, type ProductionItem as Item, type ScriptVersion, type Shoot } from '../../data/production'
 import { brandsApi } from '../../data/brands'
 import { campaignsApi } from '../../data/campaigns'
+import { moneyApi } from '../../data/money'
 import { useAsync } from '../../hooks/useAsync'
 import { useAuth } from '../../lib/auth'
 import { isStaff } from '../../lib/access'
@@ -346,15 +347,17 @@ function Files({ i, save, onChange }: { i: Item; save: (p: Parameters<typeof pro
 }
 
 function Expenses({ id }: { id: string }) {
-  const { data, loading } = useAsync(() => productionApi.expenses(id), [id])
+  const { data, loading } = useAsync(() => moneyApi.expensesFor({ deliverable_id: id }), [id])
+  const pays = useAsync(() => moneyApi.payouts().then(l => l.filter(p => p.deliverable_id === id && (p.status === 'pending' || p.status === 'approved'))), [id])
   if (loading) return <EnsoSpinner />
   const total = (data ?? []).reduce((s, x) => s + Number(x.amount), 0)
   return (
     <Card className="shoji-pad max-w-3xl">
-      <SectionTitle kanji="金">Production expenses</SectionTitle>
-      {!(data ?? []).length ? <EmptyState line="No expenses linked — ₹0." action={<p className="text-xs text-muted -mt-2">Location, props, travel and freelancer fees are linked here from Money (feature 6).</p>} /> : <>
-        <ul className="divide-y divide-line/15">{data!.map(x => <li key={x.id} className="py-2.5 flex justify-between gap-3 text-sm"><span className="text-ink">{x.description}<span className="block text-xs text-muted num">{formatDate(x.expense_date)} · {x.status}</span></span><span className="num text-ink">{formatINR(x.amount)}</span></li>)}</ul>
-        <p className="text-sm text-right mt-3 num">Total <span className="text-ink">{formatINR(total)}</span></p></>}
+      <SectionTitle kanji="金" aside={<Link className="btn-ghost h-9" to={`/money/expenses?new=1&item=${id}`}><Icon name="plus" /> Add expense</Link>}>Production expenses</SectionTitle>
+      {!(data ?? []).length ? <p className="text-sm text-muted">No expenses linked — ₹0. Location, props, travel and paid freelancer fees show here.</p> : <>
+        <ul className="divide-y divide-line/15">{data!.map(x => <li key={x.id}><Link to={`/money/expenses/${x.id}`} className="py-2.5 flex justify-between gap-3 text-sm hover:bg-raised/40"><span className="text-ink">{x.description}<span className="block text-xs text-muted num">{formatDate(x.expense_date)} · {x.category_name} · {x.status === 'paid' ? 'paid' : 'unpaid'}</span></span><span className="num text-ink">{formatINR(x.amount)}</span></Link></li>)}</ul>
+        <p className="text-sm text-right mt-3 num">Total before GST <span className="text-ink">{formatINR(total)}</span></p></>}
+      {(pays.data ?? []).length > 0 && <p className="text-sm text-muted mt-4">Still to pay: {(pays.data ?? []).map(p => <Link key={p.id} className="underline underline-offset-4 mr-2" to={`/money/payouts/${p.id}`}>{p.payee_name} {formatINR(p.gross)}</Link>)}</p>}
     </Card>
   )
 }

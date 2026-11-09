@@ -69,6 +69,6 @@ on conflict (deliverable_id, captured_on) do nothing;
 insert into public.expenses (id, category_id, campaign_id, brand_id, description, expense_date, amount, gst_amount, status)
 select '5a3b1e00-0000-4000-8000-0000000ca301', id, '5a3b1e00-0000-4000-8000-0000000ca001', '5a3b1e00-0000-4000-8000-0000000000b1',
        'Diya, brass kettle and rangoli props (sample)', public.ist_today() - 15, 8000, 1440, 'unpaid'
-from public.expense_categories where name = 'Props & wardrobe'
+from public.expense_categories where name = 'Props'
 on conflict (id) do nothing;
 commit;

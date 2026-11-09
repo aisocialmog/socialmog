@@ -23,6 +23,13 @@ import { CampaignReport } from './pages/campaigns/CampaignReport'
 import { MyWork, ProductionBoard } from './pages/production/ProductionPage'
 import { ProductionForm, ProductionItem } from './pages/production/ProductionItem'
 import { CalendarPage, SharedCalendar } from './pages/production/CalendarPage'
+import { MoneyOverview } from './pages/money/MoneyOverview'
+import { InvoiceDetailPage, InvoiceEditor, InvoicesPage } from './pages/money/Invoices'
+import { PaymentDetail, PaymentsPage } from './pages/money/Payments'
+import { ExpenseDetail, ExpensesPage } from './pages/money/Expenses'
+import { PayoutDetail, PayoutsDue, PayoutsPage } from './pages/money/Payouts'
+import { AccountDetail, AccountsPage, CapitalDetail, CapitalPage } from './pages/money/CapitalAccounts'
+import { MoneyReports, MoneySettings } from './pages/money/ReportsSettings'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -72,7 +79,25 @@ function Protected() {
           <Route path="/production/new" element={<ProductionForm />} />
           <Route path="/production/:id" element={<ProductionItem />} />
           <Route path="/calendar" element={<CalendarPage />} />
-          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar'].includes(n.to)).map(n => (
+          <Route path="/money" element={<MoneyOverview />} />
+          <Route path="/money/invoices" element={<InvoicesPage />} />
+          <Route path="/money/invoices/new" element={<InvoiceEditor />} />
+          <Route path="/money/invoices/:id" element={<InvoiceDetailPage />} />
+          <Route path="/money/invoices/:id/edit" element={<InvoiceEditor />} />
+          <Route path="/money/payments" element={<PaymentsPage />} />
+          <Route path="/money/payments/:id" element={<PaymentDetail />} />
+          <Route path="/money/expenses" element={<ExpensesPage />} />
+          <Route path="/money/expenses/:id" element={<ExpenseDetail />} />
+          <Route path="/money/payouts" element={<PayoutsPage />} />
+          <Route path="/money/payouts/due" element={<PayoutsDue />} />
+          <Route path="/money/payouts/:id" element={<PayoutDetail />} />
+          <Route path="/money/capital" element={<CapitalPage />} />
+          <Route path="/money/capital/:id" element={<CapitalDetail />} />
+          <Route path="/money/accounts" element={<AccountsPage />} />
+          <Route path="/money/accounts/:id" element={<AccountDetail />} />
+          <Route path="/money/reports" element={<MoneyReports />} />
+          <Route path="/money/settings" element={<MoneySettings />} />
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar', '/money'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />

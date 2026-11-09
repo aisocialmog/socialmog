@@ -9,7 +9,7 @@ export interface ActivityEntry {
   id: string; created_at: string; action: 'create' | 'update' | 'status_change' | 'archive' | 'restore' | 'delete'
   table_name: string; record_id: string; changed_fields: string[]
   old_values: Record<string, unknown> | null; new_values: Record<string, unknown> | null
-  source: string; actor_id: string | null; actor_name: string
+  source: string; actor_id: string | null; actor_name: string; reason?: string | null
 }
 export type ActivityKind = 'create' | 'status' | 'money' | 'archive' | 'update'
 
@@ -43,8 +43,8 @@ const FIELD: Record<string, string> = {
   ifsc: 'IFSC', tds_section: 'TDS section', tds_rate: 'TDS rate',
 }
 const COUNTS = new Set(['followers', 'avg_views'])
-const MONEY = new Set(['monthly_fee', 'rate', 'contract_value', 'creator_budget', 'production_budget', 'agreed_fee'])
-const DATES = new Set(['start_date', 'renewal_date', 'end_date', 'go_live_date'])
+const MONEY = new Set(['monthly_fee', 'rate', 'contract_value', 'creator_budget', 'production_budget', 'agreed_fee', 'amount', 'gst_amount', 'tds_deducted', 'amount_received', 'opening_balance'])
+const DATES = new Set(['start_date', 'renewal_date', 'end_date', 'go_live_date', 'due_date', 'issue_date', 'expense_date', 'paid_on', 'received_on', 'entry_date', 'opening_date', 'service_period_start', 'service_period_end'])
 
 function show(field: string, v: unknown): string {
   if (v === null || v === undefined || v === '') return 'blank'
@@ -81,7 +81,7 @@ export function describeActivity(e: ActivityEntry, names: Record<string, string>
   const noun = NOUN[e.table_name] ?? e.table_name.replace(/_/g, ' ')
   const t = titleOf(e, names)
   const thing = SELF.has(e.table_name) ? noun : `${noun}${t ? ` “${t}”` : ''}`
-  const special = describeCreatorBits(e, names) ?? describeCampaignBits(e, names)
+  const special = describeCreatorBits(e, names) ?? describeCampaignBits(e, names) ?? describeMoneyBits(e)
   if (special) return special
 
   switch (e.action) {
@@ -204,6 +204,59 @@ function describeCampaignBits(e: ActivityEntry, names: Record<string, string>): 
     case 'campaign_finances':
       if (e.action === 'create') return { text: `set the budget: client ${formatINR(Number(nv.contract_value ?? 0))}`, kind: 'money' }
       return null
+  }
+  return null
+}
+
+/** Money records: invoices, payments, expenses, payouts, capital, accounts. */
+const PAYOUT_WORD: Record<string, string> = { pending: 'Pending', approved: 'Approved', paid: 'Paid', cancelled: 'Cancelled' }
+const MONEY_FIELD: Record<string, string> = {
+  amount: 'amount', gst_amount: 'GST', tds_deducted: 'TDS', amount_received: 'amount received', due_date: 'due date', issue_date: 'invoice date', expense_date: 'date',
+  paid_on: 'paid date', received_on: 'date received', account_id: 'account', category_id: 'category', description: 'description', quantity: 'quantity', rate: 'rate',
+  gst_rate: 'GST rate', gst_enabled: 'GST', tds_rate: 'TDS rate', reference: 'reference', opening_balance: 'opening balance', opening_date: 'opening date', mode: 'mode',
+  bill_number: 'bill number', entry_date: 'date', founder_id: 'founder', kind: 'type', place_of_supply_code: 'place of supply', campaign_id: 'campaign', brand_id: 'brand', deliverable_id: 'production item',
+}
+function describeMoneyBits(e: ActivityEntry): { text: string; kind: ActivityKind } | null {
+  const nv = e.new_values ?? {}, ov = e.old_values ?? {}
+  const fields = e.changed_fields.filter(f => !QUIET.has(f) && !['change_reason', 'sent_at', 'cancelled_at', 'approved_at', 'approved_by', 'invoice_number', 'total'].includes(f))
+  const changes = () => fields.map(f => MONEY.has(f) || DATES.has(f) ? `${MONEY_FIELD[f] ?? label(f)} ${show(f, ov[f])} → ${show(f, nv[f])}` : MONEY_FIELD[f] ?? label(f)).join(', ')
+  switch (e.table_name) {
+    case 'invoices':
+      if (e.action === 'create') return { text: 'created the invoice as a draft', kind: 'create' }
+      if (e.changed_fields.includes('status') && nv.status === 'sent') return { text: `sent the invoice — numbered ${nv.invoice_number ?? ''}`.trim(), kind: 'status' }
+      if (e.changed_fields.includes('status') && nv.status === 'cancelled') return { text: 'cancelled the invoice', kind: 'archive' }
+      if (e.action === 'archive') return { text: 'deleted the draft', kind: 'archive' }
+      return fields.length ? { text: `changed ${changes()}`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'invoice_items':
+      if (e.action === 'create') return { text: `added a line: ${nv.description ?? ''}`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'removed a line', kind: 'money' }
+      return fields.length ? { text: `changed a line (${changes()})`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'receipts':
+      if (e.action === 'create') return { text: `recorded ${formatINR(Number(nv.amount_received))} received`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'archived the payment', kind: 'archive' }
+      return fields.length ? { text: `changed the payment: ${changes()}`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'receipt_allocations':
+      if (e.action === 'create') return { text: `applied ${formatINR(Number(nv.amount))} to an invoice`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'took a payment off an invoice', kind: 'money' }
+      return { text: `changed the amount applied from ${formatINR(Number(ov.amount))} to ${formatINR(Number(nv.amount))}`, kind: 'money' }
+    case 'expenses':
+      if (e.action === 'create') return { text: `added the expense${nv.amount != null ? ` (${formatINR(Number(nv.amount))})` : ''}`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'archived the expense', kind: 'archive' }
+      if (e.changed_fields.includes('status') && nv.status === 'paid') return { text: 'marked the expense paid', kind: 'status' }
+      return fields.length ? { text: `changed ${changes()}`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'creator_payouts':
+      if (e.action === 'create') return { text: `added the payout (${formatINR(Number(nv.amount))})`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'archived the payout', kind: 'archive' }
+      if (e.changed_fields.includes('status')) return { text: `moved the payout from ${PAYOUT_WORD[String(ov.status)] ?? ov.status} to ${PAYOUT_WORD[String(nv.status)] ?? nv.status}`, kind: 'status' }
+      return fields.length ? { text: `changed ${changes()}`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'capital_entries':
+      if (e.action === 'create') return { text: `recorded ${String(nv.kind ?? '').replace(/_/g, ' ')} of ${formatINR(Number(nv.amount))}`, kind: 'money' }
+      if (e.action === 'archive') return { text: 'archived the capital entry', kind: 'archive' }
+      return fields.length ? { text: `changed ${changes()}`, kind: 'money' } : { text: '', kind: 'update' }
+    case 'money_accounts':
+      if (e.action === 'create') return { text: 'opened the account', kind: 'create' }
+      if (e.action === 'archive') return { text: 'archived the account', kind: 'archive' }
+      return fields.length ? { text: `changed ${changes()}`, kind: fields.some(f => MONEY.has(f)) ? 'money' : 'update' } : { text: '', kind: 'update' }
   }
   return null
 }

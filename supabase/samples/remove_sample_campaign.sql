@@ -2,6 +2,8 @@
 -- fees, promo codes, deliverables, performance numbers, the sample expense,
 -- history). Run BEFORE remove_sample_brands.sql / remove_sample_creators.sql.
 begin;
+-- sample removal is the one place money rows are hard-deleted
+select set_config('app.allow_money_delete', 'on', true);
 create temp table sc_ids on commit drop as
   select '5a3b1e00-0000-4000-8000-0000000ca001'::uuid as id
   union select id from public.campaign_creators where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'

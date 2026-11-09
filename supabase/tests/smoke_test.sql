@@ -73,9 +73,9 @@ insert into deliverable_fees (deliverable_id, creator_fee, billable_amount) valu
 insert into tasks (title, assignee_id) values ('Tara: send script', '10000000-0000-0000-0000-000000000004'),
                                              ('Farid: export edit', '10000000-0000-0000-0000-000000000005'),
                                              ('Founder-only task', null);
-insert into money_accounts (id, name) values ('60000000-0000-0000-0000-00000000000a', 'HDFC Current');
+insert into money_accounts (id, name, opening_balance, opening_date) values ('60000000-0000-0000-0000-00000000000a', 'HDFC Current', 500000, '2026-04-01');
 insert into capital_entries (kind, founder_id, account_id, entry_date, amount)
-  select 'opening_balance', null, '60000000-0000-0000-0000-00000000000a', '2026-04-01', 500000;
+  select 'opening_capital', null, null, '2026-04-01', 500000;
 insert into invoices (id, brand_id, campaign_id, invoice_number, issue_date, due_date, status) values
   ('70000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-00000000000a', '30000000-0000-0000-0000-00000000000a', 'SM/2026-27/0001', '2026-10-05', '2026-10-20', 'sent');
 insert into invoice_items (invoice_id, description, quantity, rate) values ('70000000-0000-0000-0000-00000000000a', 'Reels', 4, 50000);

@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { moneyApi } from '../../data/money'
+import { PAY_STATUS_LABEL, PAY_STATUS_TONE } from '../../lib/money'
 import { brandsApi, type BrandOverview, type Contact, type ContactInput } from '../../data/brands'
 import { useAsync } from '../../hooks/useAsync'
 import { useAuth } from '../../lib/auth'
@@ -335,39 +337,54 @@ function Production({ brandId }: { brandId: string }) {
 }
 
 function Money({ brandId }: { brandId: string }) {
-  const inv = useAsync(() => brandsApi.invoices(brandId), [brandId])
-  const rec = useAsync(() => brandsApi.receipts(brandId), [brandId])
+  const nav = useNavigate()
+  const inv = useAsync(() => moneyApi.invoices().then(l => l.filter(i => i.brand_id === brandId)), [brandId])
+  const rec = useAsync(() => moneyApi.payments().then(l => l.filter(p => p.brand_id === brandId)), [brandId])
+  const month = istToday().slice(0, 8) + '01'
+  const ret = useAsync(() => moneyApi.retainersToInvoice(month).then(l => l.filter(r => r.brand_id === brandId)), [brandId, month])
+  const [err, setErr] = useState<string | null>(null)
   if (inv.loading || rec.loading) return <EnsoSpinner />
   const invoices = inv.data ?? [], receipts = rec.data ?? []
+  const r = ret.data?.[0]
   return (
-    <div className="grid lg:grid-cols-12 gap-4 sm:gap-6">
-      <Card className="lg:col-span-7 shoji-pad">
-        <SectionTitle kanji="金">Invoices</SectionTitle>
-        {invoices.length === 0 ? <EmptyState line="No invoices yet — ₹0 billed." action={<p className="text-xs text-muted -mt-2">Invoicing arrives with Money (feature 6).</p>} /> : (
-          <ul className="divide-y divide-line/15">
-            {invoices.map(i => (
-              <li key={i.invoice_id} className="py-3.5 flex flex-wrap items-center gap-x-4 gap-y-1">
-                <div className="flex-1 min-w-0"><p className="text-ink num">{i.invoice_number ?? 'Draft'}</p><p className="text-xs text-muted num">{i.issue_date ? `Issued ${formatDate(i.issue_date)}` : 'Not issued'}{i.due_date ? ` · due ${formatDate(i.due_date)}` : ''}</p></div>
-                <p className="text-right num text-ink">{formatINR(i.total)}{i.outstanding > 0 && <span className="block text-xs text-muted">{formatINR(i.outstanding)} left</span>}</p>
-                <div className="w-24 flex justify-end">{i.payment_status === 'paid' ? <Hanko kind="paid" size={40} animate={false} /> : i.payment_status.includes('overdue') ? <Pill tone="alert">Overdue</Pill> : <Pill>{i.payment_status.replace(/_/g, ' ')}</Pill>}</div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-      <Card className="lg:col-span-5 shoji-pad">
-        <SectionTitle kanji="入">Payments received</SectionTitle>
-        {receipts.length === 0 ? <p className="text-sm text-muted">Nothing received yet.</p> : (
-          <ul className="divide-y divide-line/15">
-            {receipts.map(r => (
-              <li key={r.id} className="py-3 flex justify-between gap-3 text-sm">
-                <span><span className="text-ink num">{formatDate(r.received_on)}</span><span className="block text-xs text-muted">{[r.mode?.toUpperCase(), r.reference].filter(Boolean).join(' · ')}</span></span>
-                <span className="text-right num text-ink">{formatINR(r.amount_received)}{Number(r.tds_deducted) > 0 && <span className="block text-xs text-muted">+ TDS {formatINR(r.tds_deducted)}</span>}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-primary" onClick={() => nav(`/money/invoices/new?brand=${brandId}`)}><Icon name="plus" /> New invoice</button>
+        {r && (r.invoice_id ? <Link className="btn-ghost" to={`/money/invoices/${r.invoice_id}`}>This month’s retainer invoice: {r.invoice_number ?? 'draft'}</Link>
+          : <button className="btn-ghost" onClick={async () => { setErr(null); try { nav(`/money/invoices/${await moneyApi.createRetainerInvoice(r.retainer_id, month)}`) } catch (e) { setErr(e instanceof Error ? e.message : String(e)) } }}>
+              Create this month’s retainer invoice ({formatINR(r.monthly_fee)})</button>)}
+        <Link className="btn-ghost" to={`/money/payments?record=1&brand=${brandId}`}>Record payment</Link>
+      </div>
+      {err && <FormError>{err}</FormError>}
+      <div className="grid lg:grid-cols-12 gap-4 sm:gap-6">
+        <Card className="lg:col-span-7 shoji-pad">
+          <SectionTitle kanji="金">Invoices</SectionTitle>
+          {invoices.length === 0 ? <EmptyState line="No invoices yet — ₹0 billed." /> : (
+            <ul className="divide-y divide-line/15">
+              {invoices.map(i => (
+                <li key={i.invoice_id}><Link to={`/money/invoices/${i.invoice_id}`} className="py-3.5 flex flex-wrap items-center gap-x-4 gap-y-1 hover:bg-raised/40">
+                  <div className="flex-1 min-w-0"><p className="text-ink num">{i.invoice_number ?? 'Draft'}</p><p className="text-xs text-muted num">{i.issue_date ? `Issued ${formatDate(i.issue_date)}` : 'Not sent yet'}{i.due_date ? ` · due ${formatDate(i.due_date)}` : ''}</p></div>
+                  <p className="text-right num text-ink">{formatINR(i.total)}{i.outstanding > 0 && <span className="block text-xs text-muted">{formatINR(i.outstanding)} left</span>}</p>
+                  <div className="w-24 flex justify-end">{i.payment_status === 'paid' ? <Hanko kind="paid" size={40} animate={false} /> : <Pill tone={PAY_STATUS_TONE[i.payment_status]}>{PAY_STATUS_LABEL[i.payment_status]}</Pill>}</div>
+                </Link></li>
+              ))}
+            </ul>
+          )}
+        </Card>
+        <Card className="lg:col-span-5 shoji-pad">
+          <SectionTitle kanji="入">Payments received</SectionTitle>
+          {receipts.length === 0 ? <p className="text-sm text-muted">Nothing received yet.</p> : (
+            <ul className="divide-y divide-line/15">
+              {receipts.map(r => (
+                <li key={r.id}><Link to={`/money/payments/${r.id}`} className="py-3 flex justify-between gap-3 text-sm hover:bg-raised/40">
+                  <span><span className="text-ink num">{formatDate(r.received_on)}</span><span className="block text-xs text-muted">{[r.mode?.toUpperCase(), r.reference, r.invoice_numbers.join(', ')].filter(Boolean).join(' · ')}</span></span>
+                  <span className="text-right num text-ink">{formatINR(r.amount_received)}{Number(r.tds_deducted) > 0 && <span className="block text-xs text-muted">+ TDS {formatINR(r.tds_deducted)}</span>}</span>
+                </Link></li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   )
 }
