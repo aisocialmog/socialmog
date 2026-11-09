@@ -3,7 +3,7 @@
 Internal database and management site for **Social Mog**, an influencer production and campaign agency in India.
 It keeps brands, creators, campaigns, production, tasks and money in one place, and calculates every total from the records.
 
-**Status:** feature 1 is built: login, roles, layout and the activity log. The database schema for every later feature is already in place.
+**Status:** features 1 (login, roles, layout, activity log) and 2 (Brands) are built. The database schema for every later feature is already in place.
 
 ![Dashboard shell](docs/preview/dashboard-founder.png)
 
@@ -67,6 +67,18 @@ backups · saved_views · activity_log
 **Functions:** `account_balances()`, `period_summary(period)`, `period_bounds()`, `fy_start()`, `fy_label()`, `global_search(q)`, `schema_rule_violations()`.
 The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quarter`, `last_quarter`, `this_fy`, `last_fy` and `custom`.
 
+## Brands (feature 2)
+
+- **List:** table and card views, plus a pipeline board (`/brands?view=pipeline`) where you drag cards between Lead → Pitching → Active → Paused → Ended. The list filters by status, engagement type and owner, and exports to CSV.
+- **Brand detail:** tabs for Overview, Contacts, Campaigns, Production, Invoices & Payments (founders and managers only), Files and Activity.
+- **Calculated figures:** lifetime revenue, outstanding and active campaigns come from the `brand_overview` view. Revenue and outstanding read ₹0 until Money (feature 6) creates invoices.
+- **Renewal warning:** a retainer renewing within 15 days, or already past its renewal date, gets a red lantern warning on the list, the cards, the pipeline and the detail page.
+- **Files and logos:** stored in the private `records` bucket under `brands/<brand id>/`.
+
+### Sample brands
+- **Add them:** paste `supabase/samples/sample_brands.sql` into Supabase → SQL Editor and run it. This adds Chai Sutra (sample), an active brand with a retainer renewing in 10 days, and Neelam Naturals (sample), a pitching brand.
+- **Remove them:** run `supabase/samples/remove_sample_brands.sql` the same way. It deletes only the two samples, their contacts, retainer, files and history. It refuses to run if you've attached real campaigns, tasks or invoices to a sample brand; archive that brand in the app instead. If you uploaded files to a sample brand, also delete its folder under `records/brands/` in Storage.
+
 ## Setting it up
 
 1. **Founders:** put both founder names and emails in `supabase/migrations/20261109000800_seed_founders.sql`. The push stops with an error while the placeholders are still there.
@@ -88,7 +100,7 @@ npm install
 npm run dev                  # http://localhost:5173
 npm test                     # ₹ format, IST dates, FY periods, CSV, role → page map, tab bar
 npm run check:contrast       # WCAG AA check of every colour pair
-npm run test:db              # migrations + 51 role/RLS checks on a local Postgres
+npm run test:db              # migrations + role/RLS and brands checks on a local Postgres
 ```
 
 Without Supabase settings, `npm run dev` shows a local-only design preview on the login page, so you can look around as each role. That preview is never included in a production build.

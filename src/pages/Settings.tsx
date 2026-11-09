@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Avatar } from '../components/ui/Avatar'
 import { Card, EmptyState, MoreMenu, Pill } from '../components/ui/kit'
 import { Icon } from '../components/ui/Icon'
+import { Modal } from '../components/ui/Modal'
 import { EnsoSpinner } from '../components/art/Ink'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
@@ -198,25 +199,6 @@ function RolePicker({ value, onChange }: { value: Role; onChange: (r: Role) => v
         ))}
       </div>
     </fieldset>
-  )
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
-    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)
-  }, [onClose])
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-end sm:place-items-center" role="dialog" aria-modal="true" aria-label={title}>
-      <button className="absolute inset-0 bg-sumi/70" aria-label="Close" onClick={onClose} />
-      <div className="relative w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-raised rounded-t-[14px] sm:rounded-shoji border border-line/30 p-6 rise">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-mincho text-xl text-ink">{title}</h2>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}><Icon name="close" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
   )
 }
 

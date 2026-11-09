@@ -23,5 +23,5 @@ for f in "$TMP"/*.sql; do
   echo "· $(basename "$f")"
   psql -q -v ON_ERROR_STOP=1 -U app_owner -f "$f" "$DB"
 done
-psql -q -v ON_ERROR_STOP=1 -U app_owner -f supabase/tests/smoke_test.sql "$DB"
+for t in smoke_test brands_test; do psql -q -v ON_ERROR_STOP=1 -U app_owner -f supabase/tests/$t.sql "$DB"; done
 rm -rf "$TMP"

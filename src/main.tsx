@@ -8,6 +8,9 @@ import { canOpen, NAV } from './lib/access'
 import { AppShell } from './layout/AppShell'
 import { Dashboard } from './pages/Dashboard'
 import { Settings } from './pages/Settings'
+import { BrandsPage } from './pages/brands/BrandsPage'
+import { BrandDetail } from './pages/brands/BrandDetail'
+import { BrandForm } from './pages/brands/BrandForm'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -36,7 +39,11 @@ function Protected() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
-          {NAV.filter(n => n.to !== '/' && n.to !== '/settings').map(n => (
+          <Route path="/brands" element={<BrandsPage />} />
+          <Route path="/brands/new" element={<BrandForm />} />
+          <Route path="/brands/:id" element={<BrandDetail />} />
+          <Route path="/brands/:id/edit" element={<BrandForm />} />
+          {NAV.filter(n => !['/', '/settings', '/brands'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />
