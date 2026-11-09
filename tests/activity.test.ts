@@ -48,3 +48,19 @@ describe('creator activity sentences', () => {
     expect(describeActivity(e({ table_name: 'creators', changed_fields: ['is_blacklisted'], old_values: { is_blacklisted: false }, new_values: { is_blacklisted: true } })).text).toBe('blacklisted the creator')
   })
 })
+
+describe('campaign activity sentences', () => {
+  it('creators, fees, posts, performance', () => {
+    expect(describeActivity(e({ table_name: 'campaign_creators', record_id: 'cc1', action: 'status_change', changed_fields: ['status'], old_values: { status: 'approved' }, new_values: { status: 'posted' } }), { cc1: 'Sana' }).text)
+      .toBe('moved Sana from Approved to Posted')
+    expect(describeActivity(e({ table_name: 'campaign_creator_fees', action: 'create', new_values: { campaign_creator_id: 'cc1', agreed_fee: 30000 } }), { cc1: 'Aarohi' }).text).toBe('set Aarohi’s fee to ₹30,000')
+    expect(describeActivity(e({ table_name: 'deliverables', action: 'status_change', changed_fields: ['stage', 'went_live_at'], old_values: { stage: 'approved' }, new_values: { stage: 'live' } }), { b1: 'Reel 1' }).text)
+      .toBe('marked “Reel 1” as posted')
+    expect(describeActivity(e({ table_name: 'deliverable_metrics', action: 'create', new_values: { deliverable_id: 'd1', views: 184000 } }), { d1: 'Diwali reel' }).text)
+      .toBe('entered performance for “Diwali reel” (184K views)')
+    expect(describeActivity(e({ table_name: 'campaigns', action: 'status_change', changed_fields: ['status'], old_values: { status: 'content_review' }, new_values: { status: 'live' } })).text)
+      .toBe('moved the campaign from Content review to Live')
+    expect(describeActivity(e({ table_name: 'campaign_finances', changed_fields: ['contract_value'], old_values: { contract_value: 250000 }, new_values: { contract_value: 300000 } })).text)
+      .toBe('changed the client budget from ₹2,50,000 to ₹3,00,000')
+  })
+})

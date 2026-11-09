@@ -60,7 +60,7 @@ insert into brands (id, name, status, industry) values
   ('20000000-0000-0000-0000-00000000000b', 'Kesar Skin', 'active', 'Beauty');
 insert into campaigns (id, brand_id, name, code, status) values
   ('30000000-0000-0000-0000-00000000000a', '20000000-0000-0000-0000-00000000000a', 'Diwali reels', 'MAMA-DIW', 'live'),
-  ('30000000-0000-0000-0000-00000000000b', '20000000-0000-0000-0000-00000000000b', 'Winter glow', 'KES-WIN', 'confirmed');
+  ('30000000-0000-0000-0000-00000000000b', '20000000-0000-0000-0000-00000000000b', 'Winter glow', 'KES-WIN', 'creator_outreach');
 insert into campaign_finances (campaign_id, contract_value) values ('30000000-0000-0000-0000-00000000000a', 300000);
 insert into campaign_members (campaign_id, team_member_id) values ('30000000-0000-0000-0000-00000000000a', '10000000-0000-0000-0000-000000000004');
 insert into creators (id, name) values ('40000000-0000-0000-0000-00000000000a', 'Asha Rao'), ('40000000-0000-0000-0000-00000000000b', 'Meher Kaur');

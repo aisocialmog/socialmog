@@ -2,6 +2,7 @@
 import { formatDate, formatINR } from './format'
 import { ENGAGEMENT_LABEL, STATUS_LABEL as BRAND_STATUS, type BrandStatus, type EngagementType } from './brands'
 import { CREATOR_STATUS_LABEL, formatCount, PLATFORM_LABEL, RATE_LABEL, type DeliverableType } from './creators'
+import { APPROVAL_LABEL, CAMPAIGN_STATUS_LABEL, CREATOR_STATUS_LABEL as CC_STATUS_LABEL, KIND_LABEL, OBJECTIVE_LABEL, type Approval, type CampaignKind, type CampaignStatus, type CreatorStatus, type Objective } from './campaigns'
 
 export interface ActivityEntry {
   id: string; created_at: string; action: 'create' | 'update' | 'status_change' | 'archive' | 'restore' | 'delete'
@@ -16,9 +17,10 @@ const NOUN: Record<string, string> = {
   files: 'file', campaigns: 'campaign', brand_tags: 'tag',
   creators: 'the creator', creator_platforms: 'platform', creator_rate_cards: 'rate', creator_tags: 'niche',
   creator_payment_details: 'payment details', shortlist_creators: 'shortlist entry',
+  campaign_finances: 'the budget', campaign_promo_codes: 'promo code', deliverables: 'deliverable', deliverable_metrics: 'performance',
 }
 /** Records described as "the X" (no name needed). */
-const SELF = new Set(['brands', 'retainers', 'creators', 'creator_payment_details'])
+const SELF = new Set(['brands', 'retainers', 'creators', 'creator_payment_details', 'campaign_finances'])
 const FIELD: Record<string, string> = {
   name: 'name', billing_name: 'billing name', industry: 'industry', website: 'website', instagram_handle: 'Instagram',
   youtube_handle: 'YouTube', engagement_type: 'engagement type', status: 'status', source: 'lead source', owner_id: 'owner',
@@ -26,18 +28,22 @@ const FIELD: Record<string, string> = {
   payment_terms_days: 'payment terms', notes: 'notes', logo_path: 'logo',
   designation: 'designation', phone: 'phone', whatsapp: 'WhatsApp', email: 'email', is_primary: 'primary contact', is_billing: 'billing contact',
   monthly_fee: 'monthly fee', start_date: 'start date', billing_day: 'billing day', renewal_date: 'renewal date', scope: 'scope of work',
-  title: 'title', kind: 'file type', file_name: 'file name',
+  title: 'title', kind: 'type', file_name: 'file name',
   gender: 'gender', languages: 'languages', manager_name: 'manager', manager_agency: 'agency', manager_phone: 'manager phone',
   manager_email: 'manager email', rating: 'rating', would_work_again: '“would work again”', is_blacklisted: 'blacklist',
   blacklist_reason: 'blacklist reason', photo_path: 'photo', handle: 'handle', platform: 'platform', url: 'profile URL',
   followers: 'followers', avg_views: 'average views', engagement_rate: 'engagement rate', metrics_updated_on: 'stats date',
   rate: 'rate', valid_to: 'end date', note: 'note',
+  objective: 'objective', platforms: 'platforms', end_date: 'end date', code: 'code',
+  brief: 'brief', key_messages: 'key messages', dos: 'do’s', donts: 'don’ts', hashtags: 'hashtags', links: 'links',
+  contract_value: 'client budget', creator_budget: 'planned creator spend', production_budget: 'planned production spend', po_number: 'PO number',
+  draft_url: 'draft link', live_url: 'live link', go_live_date: 'go-live date', approval_status: 'brand approval', stage: 'stage', agreed_fee: 'fee',
   legal_name: 'legal name', upi_id: 'UPI ID', bank_name: 'bank', bank_account_name: 'account holder', bank_account_number: 'account number',
   ifsc: 'IFSC', tds_section: 'TDS section', tds_rate: 'TDS rate',
 }
 const COUNTS = new Set(['followers', 'avg_views'])
-const MONEY = new Set(['monthly_fee', 'rate'])
-const DATES = new Set(['start_date', 'renewal_date', 'end_date'])
+const MONEY = new Set(['monthly_fee', 'rate', 'contract_value', 'creator_budget', 'production_budget', 'agreed_fee'])
+const DATES = new Set(['start_date', 'renewal_date', 'end_date', 'go_live_date'])
 
 function show(field: string, v: unknown): string {
   if (v === null || v === undefined || v === '') return 'blank'
@@ -49,6 +55,13 @@ function show(field: string, v: unknown): string {
   if (field === 'languages' && Array.isArray(v)) return v.join(', ') || 'none'
   if (field === 'status' && typeof v === 'string' && v in BRAND_STATUS) return BRAND_STATUS[v as BrandStatus]
   if (field === 'status' && typeof v === 'string' && v in CREATOR_STATUS_LABEL) return CREATOR_STATUS_LABEL[v]
+  if (field === 'status' && typeof v === 'string' && v in CAMPAIGN_STATUS_LABEL) return CAMPAIGN_STATUS_LABEL[v as CampaignStatus]
+  if (field === 'status' && typeof v === 'string' && v in CC_STATUS_LABEL) return CC_STATUS_LABEL[v as CreatorStatus]
+  if (field === 'approval_status') return APPROVAL_LABEL[v as Approval] ?? String(v)
+  if (field === 'kind' && typeof v === 'string' && v in KIND_LABEL) return KIND_LABEL[v as CampaignKind]
+  if (field === 'objective') return OBJECTIVE_LABEL[v as Objective] ?? String(v)
+  if (field === 'stage') return String(v).replace(/_/g, ' ')
+  if (Array.isArray(v)) return v.join(', ') || 'none'
   if (field === 'engagement_type') return ENGAGEMENT_LABEL[v as EngagementType] ?? String(v)
   if (field === 'payment_terms_days') return `${v} days`
   if (field === 'billing_day') return `day ${v}`
@@ -67,12 +80,13 @@ export function describeActivity(e: ActivityEntry, names: Record<string, string>
   const noun = NOUN[e.table_name] ?? e.table_name.replace(/_/g, ' ')
   const t = titleOf(e, names)
   const thing = SELF.has(e.table_name) ? noun : `${noun}${t ? ` “${t}”` : ''}`
-  const special = describeCreatorBits(e, names)
+  const special = describeCreatorBits(e, names) ?? describeCampaignBits(e, names)
   if (special) return special
 
   switch (e.action) {
     case 'create':
       if (e.table_name === 'brands') return { text: 'added the brand', kind: 'create' }
+      if (e.table_name === 'campaigns') return { text: 'created the campaign', kind: 'create' }
       if (e.table_name === 'retainers') return { text: `set up the retainer at ${formatINR(Number(e.new_values?.monthly_fee))}/month`, kind: 'money' }
       if (e.table_name === 'files') return { text: `uploaded ${thing}`, kind: 'create' }
       return { text: `added ${thing}`, kind: 'create' }
@@ -81,7 +95,7 @@ export function describeActivity(e: ActivityEntry, names: Record<string, string>
     case 'delete': return { text: `deleted ${thing}`, kind: 'archive' }
     case 'status_change': {
       const f = e.changed_fields.includes('status') ? 'status' : 'stage'
-      const verb = e.table_name === 'brands' ? 'moved the brand' : `moved ${thing}`
+      const verb = e.table_name === 'brands' ? 'moved the brand' : e.table_name === 'campaigns' ? 'moved the campaign' : `moved ${thing}`
       return { text: `${verb} from ${show(f, e.old_values?.[f])} to ${show(f, e.new_values?.[f])}`, kind: 'status' }
     }
     default: {
@@ -97,11 +111,13 @@ export function describeActivity(e: ActivityEntry, names: Record<string, string>
         if (f === 'notes' || f === 'scope' || f === 'billing_address' || f === 'logo_path')
           return { text: `updated the ${label(f)}${e.table_name === 'brands' || e.table_name === 'retainers' ? '' : ` of ${thing}`}`, kind: 'update' }
         if (f === 'is_blacklisted') return e.new_values?.is_blacklisted ? { text: 'blacklisted the creator', kind: 'archive' } : { text: 'removed the creator from the blacklist', kind: 'update' }
-        return { text: `changed ${label(f)}${SELF.has(e.table_name) && e.table_name !== 'retainers' ? '' : ` of ${thing}`} from ${from} to ${to}`, kind: MONEY.has(f) ? 'money' : 'update' }
+        const of = SELF.has(e.table_name) || e.table_name === 'campaigns' ? '' : ` of ${thing}`
+        if (e.table_name === 'campaign_finances') return { text: `changed the ${label(f)} from ${from} to ${to}`, kind: 'money' }
+        return { text: `changed ${label(f)}${e.table_name === 'retainers' ? ` of ${noun}` : of} from ${from} to ${to}`, kind: MONEY.has(f) ? 'money' : 'update' }
       }
       const list = fields.map(label)
       const joined = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list.at(-1)}` : list[0] ?? 'details'
-      return { text: `updated ${joined}${e.table_name === 'brands' || e.table_name === 'creators' ? '' : ` on ${thing}`}`, kind: 'update' }
+      return { text: `updated ${joined}${['brands', 'creators', 'campaigns'].includes(e.table_name) ? '' : ` on ${thing}`}`, kind: 'update' }
     }
   }
 }
@@ -142,6 +158,44 @@ function describeCreatorBits(e: ActivityEntry, names: Record<string, string>): {
       if (e.changed_fields.includes('status')) return { text: `marked as ${String(nv.status).replace(/_/g, ' ')} on a shortlist`, kind: 'status' }
       return null
     }
+  }
+  return null
+}
+
+/** Campaign child records: name the creator / post involved. names[] maps ids → names. */
+function describeCampaignBits(e: ActivityEntry, names: Record<string, string>): { text: string; kind: ActivityKind } | null {
+  const nv = e.new_values ?? {}, ov = e.old_values ?? {}
+  switch (e.table_name) {
+    case 'campaign_creators': {
+      const who = names[e.record_id] ?? names[String(nv.creator_id ?? ov.creator_id)] ?? 'a creator'
+      if (e.action === 'create') return { text: `added ${who} to the campaign`, kind: 'create' }
+      if (e.changed_fields.includes('status')) return { text: `moved ${who} from ${CC_STATUS_LABEL[ov.status as CreatorStatus] ?? ov.status} to ${CC_STATUS_LABEL[nv.status as CreatorStatus] ?? nv.status}`, kind: 'status' }
+      return null
+    }
+    case 'campaign_creator_fees': {
+      const who = names[String(nv.campaign_creator_id ?? ov.campaign_creator_id)] ?? names[e.record_id] ?? 'a creator'
+      if (e.action === 'create' || ov.agreed_fee == null) return { text: `set ${who}’s fee to ${formatINR(Number(nv.agreed_fee))}`, kind: 'money' }
+      if (e.changed_fields.includes('agreed_fee')) return { text: `changed ${who}’s fee from ${formatINR(Number(ov.agreed_fee))} to ${formatINR(Number(nv.agreed_fee))}`, kind: 'money' }
+      return null
+    }
+    case 'deliverables': {
+      const what = (nv.title ?? names[e.record_id] ?? 'a deliverable') as string
+      if (e.action === 'create') return { text: `planned “${what}”`, kind: 'create' }
+      if (e.changed_fields.includes('stage') && nv.stage === 'live') return { text: `marked “${what}” as posted`, kind: 'status' }
+      if (e.changed_fields.includes('stage') && nv.stage === 'cancelled') return { text: `cancelled “${what}”`, kind: 'archive' }
+      if (e.changed_fields.includes('approval_status')) return { text: `set brand approval on “${what}” to ${APPROVAL_LABEL[nv.approval_status as Approval] ?? nv.approval_status}`, kind: nv.approval_status === 'approved' ? 'status' : 'update' }
+      const fields = e.changed_fields.filter(f => !['stage', 'updated_at', 'went_live_at', 'approved_at'].includes(f)).map(label)
+      return fields.length ? { text: `updated ${fields.join(', ')} on “${what}”`, kind: 'update' } : { text: '', kind: 'update' }
+    }
+    case 'deliverable_metrics': {
+      const what = names[String(nv.deliverable_id ?? ov.deliverable_id)] ?? 'a post'
+      return { text: `entered performance for “${what}”${nv.views != null ? ` (${formatCount(Number(nv.views))} views)` : ''}`, kind: 'update' }
+    }
+    case 'campaign_promo_codes':
+      return e.action === 'create' ? { text: `added promo code ${nv.code}`, kind: 'create' } : e.action === 'archive' ? { text: 'removed a promo code', kind: 'archive' } : null
+    case 'campaign_finances':
+      if (e.action === 'create') return { text: `set the budget: client ${formatINR(Number(nv.contract_value ?? 0))}`, kind: 'money' }
+      return null
   }
   return null
 }
