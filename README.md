@@ -3,7 +3,7 @@
 Internal database and management site for **Social Mog**, an influencer production and campaign agency in India.
 It keeps brands, creators, campaigns, production, tasks and money in one place, and calculates every total from the records.
 
-**Status:** features 1 (login, roles, layout, activity log) and 2 (Brands) are built. The database schema for every later feature is already in place.
+**Status:** features 1 (login, roles, layout, activity log), 2 (Brands) and 3 (Creators) are built. The database schema for every later feature is already in place.
 
 ![Dashboard shell](docs/preview/dashboard-founder.png)
 
@@ -78,6 +78,20 @@ The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quar
 ### Sample brands
 - **Add them:** paste `supabase/samples/sample_brands.sql` into Supabase → SQL Editor and run it. This adds Chai Sutra (sample), an active brand with a retainer renewing in 10 days, and Neelam Naturals (sample), a pitching brand.
 - **Remove them:** run `supabase/samples/remove_sample_brands.sql` the same way. It deletes only the two samples, their contacts, retainer, files and history. It refuses to run if you've attached real campaigns, tasks or invoices to a sample brand; archive that brand in the app instead. If you uploaded files to a sample brand, also delete its folder under `records/brands/` in Storage.
+
+## Creators (feature 3)
+
+- **List:** table or card view. Filters cover niche, city, language, tier, platform, follower range, rate range (per deliverable type), minimum rating and blacklisted. Any filter combination can be saved as a named view, either private or shared with the team.
+- **Tier:** calculated from the biggest platform with `creator_tier()`: Nano under 10K, Micro 10K–100K, Mid 100K–500K, Macro 500K–1M, Mega 1M+.
+- **Platform stats:** each update stamps the date and keeps a snapshot in `creator_metric_snapshots`, which feeds the growth line on each platform card. Stats older than 90 days get a flag.
+- **Rate card:** one current price per deliverable type. Changing a price keeps the old one with an end date (`set_creator_rate()`).
+- **Payment details:** UPI, bank, PAN and IFSC are **founders only**, enforced by RLS and marked sensitive. The activity log stores only the last 4 characters of each.
+- **Shortlists:** select creators in the list, then "Add to shortlist". These are stored in the `shortlists` and `shortlist_creators` tables, and get linked to campaigns in feature 4.
+- **Import:** `/creators/import`. Upload a CSV, match its columns, then review it. Duplicates are detected by phone number (last 10 digits) or platform handle, both against the database and within the file. The import is all-or-nothing through `import_creators()`, and is recorded in `import_batches` and `import_rows`.
+
+### Sample creators
+- **Add them:** run `supabase/samples/sample_creators.sql` in Supabase → SQL Editor. This adds 5 creators, one in each tier from Nano to Mega. One is blacklisted, and two are in Ranchi.
+- **Remove them:** run `supabase/samples/remove_sample_creators.sql`. It refuses to run if a sample creator has since been put on a campaign or payout.
 
 ## Setting it up
 

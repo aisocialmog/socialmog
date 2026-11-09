@@ -76,3 +76,12 @@ describe('csv', () => {
     expect(csv).toBe('﻿Name,X\r\n"Mama, Bites",\'=SUM(A1)')
   })
 })
+
+describe('short numbers keep real zeros', () => {
+  it('₹120K and 120K are not shortened to 12K', () => {
+    expect(formatINRShort(120000)).toBe('₹1.2L')
+    expect(formatINRShort(100000)).toBe('₹1L')
+    expect(formatINRShort(20000)).toBe('₹20K')
+    expect(formatINRShort(150000000)).toBe('₹15Cr')
+  })
+})

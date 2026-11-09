@@ -33,3 +33,18 @@ describe('activity sentences', () => {
     expect(describeActivity(e({ action: 'archive' })).text).toBe('archived the brand')
   })
 })
+
+describe('creator activity sentences', () => {
+  it('rates, niches, platforms, payment details', () => {
+    expect(describeActivity(e({ action: 'create', table_name: 'creator_rate_cards', new_values: { deliverable_type: 'reel', rate: 9000 } })).text).toBe('set the Reel rate to ₹9,000')
+    expect(describeActivity(e({ action: 'create', table_name: 'creator_tags', new_values: { tag_id: 't1' } }), { t1: 'Food' }).text).toBe('added niche Food')
+    expect(describeActivity(e({ action: 'delete', table_name: 'creator_tags', old_values: { tag_id: 't1' } }), { t1: 'Food' }).text).toBe('removed niche Food')
+    expect(describeActivity(e({ table_name: 'creator_platforms', record_id: 'p1', changed_fields: ['followers', 'metrics_updated_on'], old_values: { followers: 48200 }, new_values: { followers: 120000 } }), { p1: 'Instagram @aarohi' }).text)
+      .toBe('updated Instagram @aarohi stats: followers 48.2K → 120K')
+    expect(describeActivity(e({ table_name: 'creator_payment_details', changed_fields: ['upi_id', 'pan'], old_values: { upi_id: '••••axis' }, new_values: { upi_id: '••••okhd' } })).text)
+      .toBe('updated payment details (UPI ID, PAN)')
+    expect(describeActivity(e({ table_name: 'creators', changed_fields: ['is_blacklisted', 'blacklist_reason'], old_values: {}, new_values: { is_blacklisted: true } })).text)
+      .toBe('updated blacklist and blacklist reason')
+    expect(describeActivity(e({ table_name: 'creators', changed_fields: ['is_blacklisted'], old_values: { is_blacklisted: false }, new_values: { is_blacklisted: true } })).text).toBe('blacklisted the creator')
+  })
+})

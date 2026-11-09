@@ -11,6 +11,11 @@ import { Settings } from './pages/Settings'
 import { BrandsPage } from './pages/brands/BrandsPage'
 import { BrandDetail } from './pages/brands/BrandDetail'
 import { BrandForm } from './pages/brands/BrandForm'
+import { CreatorsPage } from './pages/creators/CreatorsPage'
+import { CreatorDetail } from './pages/creators/CreatorDetail'
+import { CreatorForm } from './pages/creators/CreatorForm'
+import { CreatorImport } from './pages/creators/CreatorImport'
+import { ShortlistDetail, ShortlistsPage } from './pages/creators/Shortlists'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -43,7 +48,14 @@ function Protected() {
           <Route path="/brands/new" element={<BrandForm />} />
           <Route path="/brands/:id" element={<BrandDetail />} />
           <Route path="/brands/:id/edit" element={<BrandForm />} />
-          {NAV.filter(n => !['/', '/settings', '/brands'].includes(n.to)).map(n => (
+          <Route path="/creators" element={<CreatorsPage />} />
+          <Route path="/creators/new" element={<CreatorForm />} />
+          <Route path="/creators/import" element={<CreatorImport />} />
+          <Route path="/creators/shortlists" element={<ShortlistsPage />} />
+          <Route path="/creators/shortlists/:id" element={<ShortlistDetail />} />
+          <Route path="/creators/:id" element={<CreatorDetail />} />
+          <Route path="/creators/:id/edit" element={<CreatorForm />} />
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />

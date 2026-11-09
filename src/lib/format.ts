@@ -22,7 +22,7 @@ export function formatINRShort(n: number): string {
   if (a >= 1e3) return `${s}₹${trim(a / 1e3)}K`
   return `${s}₹${a}`
 }
-const trim = (x: number) => x.toFixed(x >= 100 ? 0 : x >= 10 ? 1 : 2).replace(/\.?0+$/, '')
+const trim = (x: number) => x.toFixed(x >= 100 ? 0 : x >= 10 ? 1 : 2).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
 
 /** A calendar date as YYYY-MM-DD (Postgres `date`) */
 export type ISODate = string

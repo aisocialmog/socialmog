@@ -7,6 +7,7 @@ const cache = new Map<string, { url: string; at: number }>()
 export function Avatar({ name, path, size = 32 }: { name: string; path?: string | null; size?: number }) {
   const [url, setUrl] = useState<string | null>(() => (path && cache.get(path)?.url) || null)
   useEffect(() => {
+    if (path?.startsWith('preview:')) { setUrl(path.slice(8)); return }
     if (!path || !supabase) { setUrl(null); return }
     const hit = cache.get(path)
     if (hit && Date.now() - hit.at < 50 * 60_000) { setUrl(hit.url); return }
