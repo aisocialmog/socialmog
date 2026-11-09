@@ -62,10 +62,12 @@ export function EnsoRing({ value, size = 132, children }: { value: number; size?
       <svg viewBox="0 0 100 100" width={size} height={size} className="-rotate-[100deg]" aria-hidden>
         <circle cx="50" cy="50" r={r} fill="none" stroke="rgb(var(--line))" strokeOpacity=".25" strokeWidth="2" />
         {/* the brush: a wide stroke and a narrower, longer echo give a dry-brush edge */}
+        {v > 0 && <>
         <circle cx="50" cy="50" r={r} fill="none" stroke="#E3793A" strokeWidth="7.5" strokeLinecap="round"
           strokeDasharray={`${c * v} ${c}`} style={{ transition: 'stroke-dasharray 900ms var(--ease-calm)' }} />
         <circle cx="50" cy="50" r={r + 2.6} fill="none" stroke="#F2A93B" strokeOpacity=".55" strokeWidth="1.2" strokeLinecap="round"
           strokeDasharray={`${c * v * 0.92} ${c * 2}`} />
+        </>}
       </svg>
       <div className="absolute inset-0 grid place-items-center text-center">{children}</div>
     </div>

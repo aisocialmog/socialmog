@@ -7,7 +7,7 @@ create table public.campaigns (
   id               uuid primary key default gen_random_uuid(),
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
-  created_by       uuid references public.profiles(id),
+  created_by       uuid references public.team_members(id),
   is_archived      boolean not null default false,
   archived_at      timestamptz,
   import_batch_id  uuid references public.import_batches(id),
@@ -24,10 +24,7 @@ create table public.campaigns (
   end_date         date,
   status           text not null default 'draft'
                    check (status in ('draft','pitched','confirmed','in_production','live','completed','on_hold','cancelled')),
-  owner_id         uuid references public.profiles(id),
-  contract_value   numeric(14,2) check (contract_value >= 0),  -- agreed fee, before GST (what was signed)
-  creator_budget   numeric(14,2) check (creator_budget >= 0),  -- planned spend on creators
-  po_number        text,
+  owner_id         uuid references public.team_members(id),
   completed_at     timestamptz,
   check (end_date is null or start_date is null or end_date >= start_date)
 );
@@ -40,21 +37,32 @@ create table public.campaign_creators (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  created_by         uuid references public.profiles(id),
+  created_by         uuid references public.team_members(id),
   is_archived        boolean not null default false,
   archived_at        timestamptz,
   campaign_id        uuid not null references public.campaigns(id),
   creator_id         uuid not null references public.creators(id),
   status             text not null default 'shortlisted'
                      check (status in ('shortlisted','proposed','client_approved','confirmed','contracted','live','completed','dropped')),
-  agreed_fee         numeric(14,2) check (agreed_fee >= 0),   -- total agreed with the creator
-  client_price       numeric(14,2) check (client_price >= 0), -- what the brand is billed for this creator
   usage_rights_days  int,
   exclusivity_days   int,
   notes              text,
   unique (campaign_id, creator_id)
 );
 create index campaign_creators_creator_idx on public.campaign_creators (creator_id);
+
+-- Which team members work on a campaign. Team members see only campaigns they are on.
+create table public.campaign_members (
+  id              uuid primary key default gen_random_uuid(),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  created_by      uuid references public.team_members(id),
+  campaign_id     uuid not null references public.campaigns(id),
+  team_member_id  uuid not null references public.team_members(id),
+  role_on_campaign text,                     -- lead, scriptwriter, editor…
+  unique (campaign_id, team_member_id)
+);
+create index campaign_members_member_idx on public.campaign_members (team_member_id);
 
 -- ─────────────────────────────────────────────────────────────
 -- Deliverables — the single unit of work. A reel, a story, a YouTube video.
@@ -65,7 +73,7 @@ create table public.deliverables (
   id                   uuid primary key default gen_random_uuid(),
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
-  created_by           uuid references public.profiles(id),
+  created_by           uuid references public.team_members(id),
   is_archived          boolean not null default false,
   archived_at          timestamptz,
   import_batch_id      uuid references public.import_batches(id),
@@ -81,7 +89,7 @@ create table public.deliverables (
   stage                text not null default 'brief'
                        check (stage in ('brief','scripting','script_review','shoot','editing','internal_review','client_review','changes','approved','scheduled','live','cancelled')),
   priority             text not null default 'normal' check (priority in ('low','normal','high','urgent')),
-  assignee_id          uuid references public.profiles(id),   -- internal owner
+  assignee_id          uuid references public.team_members(id),   -- internal owner
   editor_vendor_id     uuid references public.vendors(id),    -- freelance editor, if any
   brief                text,
   script_due           date,
@@ -91,9 +99,7 @@ create table public.deliverables (
   go_live_date         date,                  -- planned publish date (content calendar)
   went_live_at         timestamptz,
   live_url             text,
-  approved_at          timestamptz,
-  creator_fee          numeric(14,2) check (creator_fee >= 0),     -- agreed cost for this piece
-  billable_amount      numeric(14,2) check (billable_amount >= 0)  -- agreed price for this piece
+  approved_at          timestamptz
 );
 create index deliverables_brand_idx    on public.deliverables (brand_id);
 create index deliverables_campaign_idx on public.deliverables (campaign_id);
@@ -107,7 +113,7 @@ create table public.scripts (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  created_by      uuid references public.profiles(id),
+  created_by      uuid references public.team_members(id),
   is_archived     boolean not null default false,
   archived_at     timestamptz,
   deliverable_id  uuid not null references public.deliverables(id),
@@ -126,13 +132,13 @@ create table public.deliverable_reviews (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  created_by         uuid references public.profiles(id),
+  created_by         uuid references public.team_members(id),
   is_archived        boolean not null default false,
   archived_at        timestamptz,
   deliverable_id     uuid not null references public.deliverables(id),
   round              int not null default 1,
   reviewer_type      text not null check (reviewer_type in ('internal','client')),
-  reviewer_id        uuid references public.profiles(id),
+  reviewer_id        uuid references public.team_members(id),
   brand_contact_id   uuid references public.brand_contacts(id),
   status             text not null default 'pending'
                      check (status in ('pending','approved','changes_requested','rejected')),
@@ -146,7 +152,7 @@ create table public.deliverable_metrics (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  created_by      uuid references public.profiles(id),
+  created_by      uuid references public.team_members(id),
   deliverable_id  uuid not null references public.deliverables(id),
   captured_on     date not null,
   views           bigint,
@@ -166,7 +172,7 @@ create table public.shoots (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   is_archived  boolean not null default false,
   archived_at  timestamptz,
   title        text not null,
@@ -186,7 +192,7 @@ create table public.shoot_deliverables (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  created_by      uuid references public.profiles(id),
+  created_by      uuid references public.team_members(id),
   shoot_id        uuid not null references public.shoots(id),
   deliverable_id  uuid not null references public.deliverables(id),
   unique (shoot_id, deliverable_id)
@@ -197,13 +203,13 @@ create table public.shoot_crew (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   shoot_id     uuid not null references public.shoots(id),
-  profile_id   uuid references public.profiles(id),
+  team_member_id uuid references public.team_members(id),
   vendor_id    uuid references public.vendors(id),
   creator_id   uuid references public.creators(id),
   role         text,                         -- DOP, talent, stylist…
-  check (num_nonnulls(profile_id, vendor_id, creator_id) = 1)
+  check (num_nonnulls(team_member_id, vendor_id, creator_id) = 1)
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -215,7 +221,7 @@ create table public.calendar_events (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   is_archived  boolean not null default false,
   archived_at  timestamptz,
   title        text not null,

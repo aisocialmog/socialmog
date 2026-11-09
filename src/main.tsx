@@ -1,48 +1,72 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { BrowserRouter, Route, Routes, useParams } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import './styles/index.css'
 import { PrefsProvider } from './lib/prefs'
+import { AuthProvider, useAuth } from './lib/auth'
+import { canOpen, NAV } from './lib/access'
 import { AppShell } from './layout/AppShell'
 import { Dashboard } from './pages/Dashboard'
-import { BrandsList } from './pages/BrandsList'
-import { BrandDetail } from './pages/BrandDetail'
-import { Login } from './pages/Login'
-import { Placeholder } from './pages/Placeholder'
-import { NAV } from './layout/nav'
+import { Settings } from './pages/Settings'
+import { NotAllowed, Placeholder } from './pages/Placeholder'
+import { Login } from './pages/auth/Login'
+import { ForgotPassword } from './pages/auth/ForgotPassword'
+import { ResetPassword } from './pages/auth/ResetPassword'
+import { AuthCallback } from './pages/auth/AuthCallback'
+import { NoAccess } from './pages/auth/NoAccess'
+import { EnsoSpinner } from './components/art/Ink'
 import { EmptyState } from './components/ui/kit'
 
-const FEATURE: Record<string, number> = {
-  '/creators': 3, '/campaigns': 4, '/production': 5, '/calendar': 5, '/tasks': 8,
-  '/money': 6, '/reports': 9, '/ai': 10, '/settings': 13,
+function Loading() {
+  return <div className="min-h-screen grid place-items-center"><EnsoSpinner size={48} label="Loading Social Mog OS" /></div>
 }
 
-function BrandRoute() {
-  const { id } = useParams()
-  return id === 'b1' ? <BrandDetail /> : <div className="shoji"><EmptyState sketch="koi" line="This page in the preview only has the Mama Bites detail." /></div>
+/** Everything behind login. Pages a role can't open show NotAllowed
+ *  (and the database returns nothing for them anyway). */
+function Protected() {
+  const { state, role } = useAuth()
+  const loc = useLocation()
+  if (state.kind === 'loading') return <Loading />
+  if (state.kind === 'signed_out') return <Navigate to="/login" replace state={{ from: loc.pathname }} />
+  if (state.kind === 'no_access') return <NoAccess email={state.email} reason={state.reason} />
+  const allowed = canOpen(role!, loc.pathname)
+  return (
+    <AppShell>
+      {!allowed ? <NotAllowed /> : (
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/settings" element={<Settings />} />
+          {NAV.filter(n => n.to !== '/' && n.to !== '/settings').map(n => (
+            <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
+          ))}
+          <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />
+        </Routes>
+      )}
+    </AppShell>
+  )
+}
+
+function PublicOnly({ children }: { children: React.ReactNode }) {
+  const { state } = useAuth()
+  if (state.kind === 'loading') return <Loading />
+  if (state.kind === 'ready') return <Navigate to="/" replace />
+  return <>{children}</>
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <PrefsProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={
-            <AppShell>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/brands" element={<BrandsList />} />
-                <Route path="/brands/:id" element={<BrandRoute />} />
-                {NAV.filter(n => FEATURE[n.to]).map(n => (
-                  <Route key={n.to} path={n.to} element={<Placeholder title={n.label} kanji={n.kanji} feature={FEATURE[n.to]} />} />
-                ))}
-                <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />
-              </Routes>
-            </AppShell>
-          } />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
+            <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/*" element={<Protected />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </PrefsProvider>
   </React.StrictMode>,
 )

@@ -4,12 +4,48 @@
 -- an invoice line). Every total, balance, profit and outstanding figure is
 -- calculated in the views of 0006 — never stored, never typed.
 
+-- ─────────────────────────────────────────────────────────────
+-- Money that belongs to campaigns / creators / deliverables lives in these
+-- side tables (one row each) instead of on the work tables, so team members
+-- and freelancers can see the work without ever seeing an amount.
+-- ─────────────────────────────────────────────────────────────
+create table public.campaign_finances (
+  id              uuid primary key default gen_random_uuid(),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  created_by      uuid references public.team_members(id),
+  campaign_id     uuid not null unique references public.campaigns(id),
+  contract_value  numeric(14,2) check (contract_value >= 0),  -- agreed fee, before GST (what was signed)
+  creator_budget  numeric(14,2) check (creator_budget >= 0),  -- planned spend on creators
+  po_number       text
+);
+
+create table public.campaign_creator_fees (
+  id                   uuid primary key default gen_random_uuid(),
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now(),
+  created_by           uuid references public.team_members(id),
+  campaign_creator_id  uuid not null unique references public.campaign_creators(id),
+  agreed_fee           numeric(14,2) check (agreed_fee >= 0),    -- total agreed with the creator
+  client_price         numeric(14,2) check (client_price >= 0)   -- what the brand is billed for this creator
+);
+
+create table public.deliverable_fees (
+  id               uuid primary key default gen_random_uuid(),
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  created_by       uuid references public.team_members(id),
+  deliverable_id   uuid not null unique references public.deliverables(id),
+  creator_fee      numeric(14,2) check (creator_fee >= 0),       -- agreed cost for this piece
+  billable_amount  numeric(14,2) check (billable_amount >= 0)    -- agreed price for this piece
+);
+
 -- Where money sits: bank accounts, cash, UPI/wallets.
 create table public.money_accounts (
   id            uuid primary key default gen_random_uuid(),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  created_by    uuid references public.profiles(id),
+  created_by    uuid references public.team_members(id),
   is_archived   boolean not null default false,
   archived_at   timestamptz,
   name          text not null,               -- "HDFC Current", "Petty cash"
@@ -26,7 +62,7 @@ create table public.invoices (
   id                    uuid primary key default gen_random_uuid(),
   created_at            timestamptz not null default now(),
   updated_at            timestamptz not null default now(),
-  created_by            uuid references public.profiles(id),
+  created_by            uuid references public.team_members(id),
   is_archived           boolean not null default false,
   archived_at           timestamptz,
   import_batch_id       uuid references public.import_batches(id),
@@ -58,7 +94,7 @@ create table public.invoice_items (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  created_by      uuid references public.profiles(id),
+  created_by      uuid references public.team_members(id),
   is_archived     boolean not null default false,
   archived_at     timestamptz,
   invoice_id      uuid not null references public.invoices(id),
@@ -81,7 +117,7 @@ create table public.receipts (
   id                uuid primary key default gen_random_uuid(),
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
-  created_by        uuid references public.profiles(id),
+  created_by        uuid references public.team_members(id),
   is_archived       boolean not null default false,
   archived_at       timestamptz,
   import_batch_id   uuid references public.import_batches(id),
@@ -103,7 +139,7 @@ create table public.receipt_allocations (
   id          uuid primary key default gen_random_uuid(),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
-  created_by  uuid references public.profiles(id),
+  created_by  uuid references public.team_members(id),
   is_archived boolean not null default false,
   archived_at timestamptz,
   receipt_id  uuid not null references public.receipts(id),
@@ -120,7 +156,7 @@ create table public.expense_categories (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   is_archived  boolean not null default false,
   archived_at  timestamptz,
   name         text not null unique,
@@ -132,7 +168,7 @@ create table public.expenses (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  created_by         uuid references public.profiles(id),
+  created_by         uuid references public.team_members(id),
   is_archived        boolean not null default false,
   archived_at        timestamptz,
   import_batch_id    uuid references public.import_batches(id),
@@ -153,7 +189,7 @@ create table public.expenses (
   status             text not null default 'paid' check (status in ('unpaid','paid','reimbursed')),
   paid_on            date,
   account_id         uuid references public.money_accounts(id),
-  paid_by_profile_id uuid references public.profiles(id),
+  paid_by_member_id  uuid references public.team_members(id),
   is_recurring       boolean not null default false,
   notes              text
 );
@@ -167,7 +203,7 @@ create table public.creator_payouts (
   id                   uuid primary key default gen_random_uuid(),
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
-  created_by           uuid references public.profiles(id),
+  created_by           uuid references public.team_members(id),
   is_archived          boolean not null default false,
   archived_at          timestamptz,
   import_batch_id      uuid references public.import_batches(id),
@@ -193,7 +229,7 @@ create table public.creator_payout_items (
   id              uuid primary key default gen_random_uuid(),
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  created_by      uuid references public.profiles(id),
+  created_by      uuid references public.team_members(id),
   is_archived     boolean not null default false,
   archived_at     timestamptz,
   payout_id       uuid not null references public.creator_payouts(id),
@@ -210,13 +246,13 @@ create table public.capital_entries (
   id            uuid primary key default gen_random_uuid(),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  created_by    uuid references public.profiles(id),
+  created_by    uuid references public.team_members(id),
   is_archived   boolean not null default false,
   archived_at   timestamptz,
   import_batch_id uuid references public.import_batches(id),
   kind          text not null
                 check (kind in ('opening_balance','founder_contribution','founder_withdrawal','loan_in','loan_repayment','reimbursement')),
-  founder_id    uuid references public.profiles(id),   -- whose money (null for opening balance)
+  founder_id    uuid references public.team_members(id),   -- whose money (null for opening balance)
   account_id    uuid not null references public.money_accounts(id),
   entry_date    date not null,
   amount        numeric(14,2) not null check (amount > 0),  -- sign comes from kind
@@ -229,7 +265,7 @@ create table public.account_transfers (
   id               uuid primary key default gen_random_uuid(),
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
-  created_by       uuid references public.profiles(id),
+  created_by       uuid references public.team_members(id),
   is_archived      boolean not null default false,
   archived_at      timestamptz,
   from_account_id  uuid not null references public.money_accounts(id),
@@ -245,13 +281,13 @@ create table public.targets (
   id            uuid primary key default gen_random_uuid(),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  created_by    uuid references public.profiles(id),
+  created_by    uuid references public.team_members(id),
   is_archived   boolean not null default false,
   archived_at   timestamptz,
   metric        text not null check (metric in ('revenue','collections','profit','deliverables_live','new_brands')),
   period_start  date not null,
   period_end    date not null,
   target_value  numeric(14,2) not null check (target_value > 0),
-  profile_id    uuid references public.profiles(id),   -- null = whole agency
+  team_member_id uuid references public.team_members(id),  -- null = whole agency
   check (period_end >= period_start)
 );

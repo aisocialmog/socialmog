@@ -1,0 +1,41 @@
+# Supabase project settings used by `supabase start` (local) and as the
+# reference for the hosted project. Mirror the [auth] values in the dashboard:
+# Authentication → Providers / URL Configuration.
+project_id = "social-mog-os"
+
+[api]
+port = 54321
+schemas = ["public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[studio]
+port = 54323
+
+[storage]
+file_size_limit = "200MiB"
+
+[auth]
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173/auth/callback", "http://localhost:5173/reset-password"]
+jwt_expiry = 3600
+# Invite only: nobody can create their own account (email OR Google).
+enable_signup = false
+enable_anonymous_sign_ins = false
+
+[auth.email]
+enable_signup = false
+double_confirm_changes = true
+enable_confirmations = true
+secure_password_change = true
+
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
+
+[functions.invite-member]
+verify_jwt = true

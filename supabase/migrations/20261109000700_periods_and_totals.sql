@@ -139,20 +139,41 @@ union all
   select 'transfer_in', x.id, x.transfer_date, x.to_account_id, x.amount, 1, 'transfer', null, null
   from public.account_transfers x where not x.is_archived;
 
-create or replace view public.account_balances with (security_invoker = true) as
-select a.id as account_id, a.name, a.kind,
-       coalesce(sum(l.amount * l.direction), 0) as balance
-from public.money_accounts a
-left join public.money_ledger l on l.account_id = a.id
-where not a.is_archived
-group by a.id;
+-- Balances include capital (opening balance, founder money), which managers may
+-- not see line by line — so this runs as the owner and returns totals only,
+-- to founders and managers.
+create or replace function public.account_balances()
+returns table (account_id uuid, name text, kind text, balance numeric)
+language sql stable security definer set search_path = public as $$
+  select a.id, a.name, a.kind, coalesce(sum(l.amount * l.direction), 0)
+  from public.money_accounts a
+  left join (
+    select r.account_id, r.amount_received amount, 1 direction from public.receipts r where not r.is_archived
+    union all
+    select e.account_id, e.total - e.tds_deducted, -1 from public.expenses e
+      where not e.is_archived and e.status = 'paid' and e.account_id is not null
+    union all
+    select t.account_id, t.net_payable, -1 from public.creator_payout_totals t
+      where t.status = 'paid' and t.account_id is not null
+    union all
+    select c.account_id, c.amount,
+           case when c.kind in ('opening_balance','founder_contribution','loan_in') then 1 else -1 end
+      from public.capital_entries c where not c.is_archived
+    union all
+    select x.from_account_id, x.amount, -1 from public.account_transfers x where not x.is_archived
+    union all
+    select x.to_account_id, x.amount, 1 from public.account_transfers x where not x.is_archived
+  ) l on l.account_id = a.id
+  where not a.is_archived and public.is_staff()
+  group by a.id
+$$;
 
 -- ─────────────────────────────────────────────────────────────
 -- Campaign P&L — revenue is what was invoiced (pre-GST).
 -- ─────────────────────────────────────────────────────────────
 create or replace view public.campaign_financials with (security_invoker = true) as
 select
-  c.id as campaign_id, c.brand_id, c.name, c.status, c.contract_value,
+  c.id as campaign_id, c.brand_id, c.name, c.status, cf.contract_value, cf.creator_budget,
   coalesce(inv.billed, 0)        as billed,
   coalesce(inv.outstanding, 0)   as outstanding,
   coalesce(inv.received, 0)      as received,
@@ -164,6 +185,7 @@ select
        then round((coalesce(inv.billed,0) - coalesce(po.creator_cost,0) - coalesce(ex.direct_cost,0))
                   / inv.billed * 100, 1) end as margin_pct
 from public.campaigns c
+left join public.campaign_finances cf on cf.campaign_id = c.id
 left join (select campaign_id, sum(subtotal) billed, sum(outstanding) outstanding, sum(paid) received
            from public.invoice_totals where document_status = 'sent' group by campaign_id) inv
        on inv.campaign_id = c.id

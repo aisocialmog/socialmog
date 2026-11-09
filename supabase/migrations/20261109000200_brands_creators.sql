@@ -7,7 +7,7 @@ create table public.brands (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  created_by         uuid references public.profiles(id),
+  created_by         uuid references public.team_members(id),
   is_archived        boolean not null default false,
   archived_at        timestamptz,
   import_batch_id    uuid references public.import_batches(id),
@@ -20,7 +20,7 @@ create table public.brands (
                      check (relationship in ('project','retainer','both')),
   status             text not null default 'lead'
                      check (status in ('lead','pitching','active','paused','churned')),
-  owner_id           uuid references public.profiles(id),  -- which founder owns the account
+  owner_id           uuid references public.team_members(id),  -- which founder owns the account
   source             text,                    -- referral, inbound, outreach…
   gstin              text,
   pan                text,
@@ -38,7 +38,7 @@ create table public.brand_contacts (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   is_archived  boolean not null default false,
   archived_at  timestamptz,
   brand_id     uuid not null references public.brands(id),
@@ -57,7 +57,7 @@ create table public.retainers (
   id            uuid primary key default gen_random_uuid(),
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now(),
-  created_by    uuid references public.profiles(id),
+  created_by    uuid references public.team_members(id),
   is_archived   boolean not null default false,
   archived_at   timestamptz,
   brand_id      uuid not null references public.brands(id),
@@ -78,7 +78,7 @@ create table public.retainer_scope_items (
   id                 uuid primary key default gen_random_uuid(),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  created_by         uuid references public.profiles(id),
+  created_by         uuid references public.team_members(id),
   is_archived        boolean not null default false,
   archived_at        timestamptz,
   retainer_id        uuid not null references public.retainers(id),
@@ -94,7 +94,7 @@ create table public.tags (
   id           uuid primary key default gen_random_uuid(),
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
-  created_by   uuid references public.profiles(id),
+  created_by   uuid references public.team_members(id),
   is_archived  boolean not null default false,
   archived_at  timestamptz,
   name         text not null,
@@ -106,7 +106,7 @@ create table public.brand_tags (
   id          uuid primary key default gen_random_uuid(),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
-  created_by  uuid references public.profiles(id),
+  created_by  uuid references public.team_members(id),
   brand_id    uuid not null references public.brands(id),
   tag_id      uuid not null references public.tags(id),
   unique (brand_id, tag_id)
@@ -119,7 +119,7 @@ create table public.creators (
   id                uuid primary key default gen_random_uuid(),
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
-  created_by        uuid references public.profiles(id),
+  created_by        uuid references public.team_members(id),
   is_archived       boolean not null default false,
   archived_at       timestamptz,
   import_batch_id   uuid references public.import_batches(id),
@@ -137,7 +137,7 @@ create table public.creators (
   status            text not null default 'prospect'
                     check (status in ('prospect','active','inactive','do_not_work')),
   rating            smallint check (rating between 1 and 5),
-  owner_id          uuid references public.profiles(id),
+  owner_id          uuid references public.team_members(id),
   shipping_address  text,                    -- for product seeding / barter
   notes             text
 );
@@ -148,7 +148,7 @@ create table public.creator_tags (
   id          uuid primary key default gen_random_uuid(),
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
-  created_by  uuid references public.profiles(id),
+  created_by  uuid references public.team_members(id),
   creator_id  uuid not null references public.creators(id),
   tag_id      uuid not null references public.tags(id),
   unique (creator_id, tag_id)
@@ -159,7 +159,7 @@ create table public.creator_platforms (
   id               uuid primary key default gen_random_uuid(),
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now(),
-  created_by       uuid references public.profiles(id),
+  created_by       uuid references public.team_members(id),
   is_archived      boolean not null default false,
   archived_at      timestamptz,
   creator_id       uuid not null references public.creators(id),
@@ -180,7 +180,7 @@ create table public.creator_metric_snapshots (
   id                  uuid primary key default gen_random_uuid(),
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
-  created_by          uuid references public.profiles(id),
+  created_by          uuid references public.team_members(id),
   creator_platform_id uuid not null references public.creator_platforms(id),
   captured_on         date not null,
   followers           bigint,
@@ -194,7 +194,7 @@ create table public.creator_rate_cards (
   id                uuid primary key default gen_random_uuid(),
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now(),
-  created_by        uuid references public.profiles(id),
+  created_by        uuid references public.team_members(id),
   is_archived       boolean not null default false,
   archived_at       timestamptz,
   creator_id        uuid not null references public.creators(id),
@@ -212,7 +212,7 @@ create table public.creator_payment_details (
   id                   uuid primary key default gen_random_uuid(),
   created_at           timestamptz not null default now(),
   updated_at           timestamptz not null default now(),
-  created_by           uuid references public.profiles(id),
+  created_by           uuid references public.team_members(id),
   is_archived          boolean not null default false,
   archived_at          timestamptz,
   creator_id           uuid not null unique references public.creators(id),
@@ -235,14 +235,14 @@ create table public.vendors (
   id             uuid primary key default gen_random_uuid(),
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
-  created_by     uuid references public.profiles(id),
+  created_by     uuid references public.team_members(id),
   is_archived    boolean not null default false,
   archived_at    timestamptz,
   name           text not null,
   kind           text not null default 'freelancer'
                  check (kind in ('freelancer','studio','agency','software','equipment','travel','other')),
   skill          text,                       -- editor, DOP, scriptwriter…
-  profile_id     uuid references public.profiles(id),  -- if this freelancer also logs in
+  team_member_id uuid unique references public.team_members(id),  -- if this freelancer also logs in
   email          text,
   phone          text,
   pan            text,

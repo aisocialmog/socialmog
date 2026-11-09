@@ -45,3 +45,9 @@ export function usePrefs() {
   if (!c) throw new Error('usePrefs outside PrefsProvider')
   return c
 }
+
+/** The global date range from the top bar. Every page reads this. */
+export function usePeriod() {
+  const { period, range, setPeriod } = usePrefs()
+  return { period, range, setPeriod }
+}

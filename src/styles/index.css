@@ -58,9 +58,9 @@ h1, h2, h3, .font-mincho { font-family: 'Shippori Mincho', serif; letter-spacing
 .shoji-pad { @apply p-5 sm:p-6; }
 
 /* Buttons */
-.btn { @apply inline-flex items-center gap-2 rounded-shoji px-4 h-10 text-sm font-medium transition-all duration-calm ease-calm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg; }
+.btn { @apply inline-flex items-center gap-2 rounded-shoji px-4 h-10 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-calm ease-calm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg; }
 .btn-primary { @apply btn bg-accent text-sumi; }
-.btn-primary:hover { background-image: var(--sunset); }
+.btn-primary:hover:not(:disabled) { background-image: var(--sunset); }
 .btn-ghost { @apply btn text-ink border border-line/40 hover:bg-raised; }
 .icon-btn { @apply inline-flex items-center justify-center w-10 h-10 rounded-shoji text-muted hover:text-ink hover:bg-raised transition-colors duration-calm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
 

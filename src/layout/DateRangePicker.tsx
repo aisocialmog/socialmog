@@ -3,7 +3,7 @@ import { PERIOD_LABELS, formatRange, fyLabel, istToday, type PeriodKey } from '.
 import { usePrefs } from '../lib/prefs'
 import { Icon } from '../components/ui/Icon'
 
-const PRESETS: PeriodKey[] = ['this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'this_fy', 'last_fy']
+const PRESETS: PeriodKey[] = ['this_week', 'last_week', 'this_month', 'last_month', 'this_fy']
 
 export function DateRangePicker() {
   const { period, range, setPeriod } = usePrefs()
@@ -30,13 +30,13 @@ export function DateRangePicker() {
         <Icon name="chevronDown" className="text-muted shrink-0" />
       </button>
       {open && (
-        <div role="dialog" aria-label="Choose a period" className="absolute right-0 z-40 mt-2 w-[19rem] shoji bg-raised p-4 shadow-2xl shadow-black/30 rise">
+        <div role="dialog" aria-label="Choose a period" className="absolute left-0 md:left-auto md:right-0 z-40 mt-2 w-[19rem] max-w-[calc(100vw-2rem)] shoji bg-raised p-4 shadow-2xl shadow-black/30 rise">
           <p className="eyebrow mb-2">Period</p>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5 [&>*:last-child:nth-child(odd)]:col-span-2">
             {PRESETS.map(p => (
               <button key={p} onClick={() => { setPeriod(p); setOpen(false) }}
                 className={`text-left text-sm rounded-shoji px-3 py-2 transition-colors duration-calm ${period === p ? 'bg-accent text-sumi' : 'hover:bg-card text-ink'}`}>
-                {p === 'this_fy' ? `This FY (${fyLabel(istToday()).slice(3)})` : p === 'last_fy' ? 'Last FY' : PERIOD_LABELS[p]}
+                {p === 'this_fy' ? `This FY (${fyLabel(istToday()).slice(3)})` : PERIOD_LABELS[p]}
               </button>
             ))}
           </div>
