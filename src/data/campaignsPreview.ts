@@ -171,7 +171,7 @@ export const campaignsPreview = {
     const have = dels.filter(d => d.campaign_creator_id === ccId && d.deliverable_type === type && d.stage !== 'cancelled')
     for (let i = have.length; i < qty; i++) {
       const name = (await creatorsApi.byIds([cc.creator_id]))[0]?.name ?? 'Creator'
-      const d = D(uid(), ccId, cc.creator_id, `${name.replace(' (sample)', '')} — ${type.replace('_', ' ')} ${i + 1}`, type, 'brief', 'not_submitted', null, null, 0)
+      const d = D(uid(), ccId, cc.creator_id, `${name.replace(' (sample)', '')} — ${type.replace('_', ' ')} ${i + 1}`, type, 'idea', 'not_submitted', null, null, 0)
       d.campaign_id = cc.campaign_id; d.go_live_date = null; d.created_at = now(); dels.push(d); record('deliverables', d.id, cc.campaign_id, null, { title: d.title })
     }
     have.filter(d => d.stage !== 'live').sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, Math.max(have.length - qty, 0))
@@ -184,8 +184,8 @@ export const campaignsPreview = {
     const next = { ...d, ...patch } as Del
     if (next.stage === 'live' && !next.live_url?.trim()) throw new Error('Add the live post link before marking it posted.')
     if (patch.approval_status === 'approved' && !['approved', 'scheduled', 'live', 'cancelled'].includes(next.stage)) next.stage = 'approved'
-    if (patch.approval_status === 'pending' && ['brief', 'scripting', 'script_review', 'shoot', 'editing', 'internal_review'].includes(next.stage)) next.stage = 'client_review'
-    if (patch.approval_status === 'changes_requested' && next.stage !== 'live') next.stage = 'changes'
+    if (patch.approval_status === 'pending' && ['idea', 'script', 'script_approved', 'pre_production', 'shoot_scheduled', 'shot', 'editing', 'internal_review'].includes(next.stage)) next.stage = 'client_review'
+    if (patch.approval_status === 'changes_requested' && next.stage !== 'live') next.stage = 'revisions'
     next.went_live_at = next.stage === 'live' ? (d.went_live_at ?? now()) : null
     Object.assign(d, next); record('deliverables', id, d.campaign_id, b, { ...d })
   },

@@ -11,7 +11,12 @@ create temp table sc_ids on commit drop as
   union select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
   union select m.id from public.deliverable_metrics m join public.deliverables d on d.id = m.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
   union select id from public.expenses where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
-  union select id from public.files where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001';
+  union select id from public.files where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+  union select id from public.shoots where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+  union select p.id from public.production_people p join public.deliverables d on d.id = p.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+  union select e.id from public.edit_versions e join public.deliverables d on d.id = e.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+  union select s.id from public.scripts s join public.deliverables d on d.id = s.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+  union select c.id from public.script_comments c join public.scripts s on s.id = c.script_id join public.deliverables d on d.id = s.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001';
 do $$
 begin
   if exists (select 1 from public.invoices where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001')
@@ -20,6 +25,14 @@ begin
   end if;
 end $$;
 update public.shortlists set campaign_id = null where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001';
+delete from public.production_people where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.edit_versions where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.script_comments where script_id in (select s.id from public.scripts s join public.deliverables d on d.id = s.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.scripts where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.shoot_crew where shoot_id in (select id from public.shoots where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.shoot_deliverables where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001')
+   or shoot_id in (select id from public.shoots where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.shoots where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001';
 delete from public.deliverable_metrics where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
 delete from public.deliverable_reviews where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
 delete from public.deliverable_fees where deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');

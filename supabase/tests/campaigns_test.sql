@@ -49,7 +49,7 @@ select pg_temp.expect('cost per post re-splits after cancelling', (select round(
 
 -- tracker: approval drives stage; posting needs a link and clears the overdue warning
 update deliverables set approval_status = 'changes_requested' where id = '5a3b1e00-0000-4000-8000-0000000ca205';
-select pg_temp.expect('changes requested → stage "changes"', (select stage from deliverables where id = '5a3b1e00-0000-4000-8000-0000000ca205'), 'changes');
+select pg_temp.expect('changes requested → stage "revisions"', (select stage from deliverables where id = '5a3b1e00-0000-4000-8000-0000000ca205'), 'revisions');
 update deliverables set approval_status = 'approved' where id = '5a3b1e00-0000-4000-8000-0000000ca205';
 select pg_temp.expect('approved → approved_at stamped', (select stage || '/' || (approved_at is not null) from deliverables where id = '5a3b1e00-0000-4000-8000-0000000ca205'), 'approved/true');
 select pg_temp.expect_error('cannot mark posted without the live link',

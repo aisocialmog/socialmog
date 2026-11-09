@@ -2,6 +2,7 @@
 import { formatDate, formatINR } from './format'
 import { ENGAGEMENT_LABEL, STATUS_LABEL as BRAND_STATUS, type BrandStatus, type EngagementType } from './brands'
 import { CREATOR_STATUS_LABEL, formatCount, PLATFORM_LABEL, RATE_LABEL, type DeliverableType } from './creators'
+import { STAGE_LABEL, ROLE_LABEL, type Stage, type PersonRole } from './production'
 import { APPROVAL_LABEL, CAMPAIGN_STATUS_LABEL, CREATOR_STATUS_LABEL as CC_STATUS_LABEL, KIND_LABEL, OBJECTIVE_LABEL, type Approval, type CampaignKind, type CampaignStatus, type CreatorStatus, type Objective } from './campaigns'
 
 export interface ActivityEntry {
@@ -60,7 +61,7 @@ function show(field: string, v: unknown): string {
   if (field === 'approval_status') return APPROVAL_LABEL[v as Approval] ?? String(v)
   if (field === 'kind' && typeof v === 'string' && v in KIND_LABEL) return KIND_LABEL[v as CampaignKind]
   if (field === 'objective') return OBJECTIVE_LABEL[v as Objective] ?? String(v)
-  if (field === 'stage') return String(v).replace(/_/g, ' ')
+  if (field === 'stage') return STAGE_LABEL[v as Stage] ?? String(v).replace(/_/g, ' ')
   if (Array.isArray(v)) return v.join(', ') || 'none'
   if (field === 'engagement_type') return ENGAGEMENT_LABEL[v as EngagementType] ?? String(v)
   if (field === 'payment_terms_days') return `${v} days`
@@ -183,6 +184,7 @@ function describeCampaignBits(e: ActivityEntry, names: Record<string, string>): 
       if (e.action === 'create') return { text: `planned “${what}”`, kind: 'create' }
       if (e.changed_fields.includes('stage') && nv.stage === 'live') return { text: `marked “${what}” as posted`, kind: 'status' }
       if (e.changed_fields.includes('stage') && nv.stage === 'cancelled') return { text: `cancelled “${what}”`, kind: 'archive' }
+      if (e.changed_fields.includes('stage')) return { text: `moved “${what}” from ${STAGE_LABEL[ov.stage as Stage] ?? ov.stage} to ${STAGE_LABEL[nv.stage as Stage] ?? nv.stage}`, kind: 'status' }
       if (e.changed_fields.includes('approval_status')) return { text: `set brand approval on “${what}” to ${APPROVAL_LABEL[nv.approval_status as Approval] ?? nv.approval_status}`, kind: nv.approval_status === 'approved' ? 'status' : 'update' }
       const fields = e.changed_fields.filter(f => !['stage', 'updated_at', 'went_live_at', 'approved_at'].includes(f)).map(label)
       return fields.length ? { text: `updated ${fields.join(', ')} on “${what}”`, kind: 'update' } : { text: '', kind: 'update' }
@@ -191,6 +193,12 @@ function describeCampaignBits(e: ActivityEntry, names: Record<string, string>): 
       const what = names[String(nv.deliverable_id ?? ov.deliverable_id)] ?? 'a post'
       return { text: `entered performance for “${what}”${nv.views != null ? ` (${formatCount(Number(nv.views))} views)` : ''}`, kind: 'update' }
     }
+    case 'production_people': return e.action === 'delete' ? { text: `removed a ${ROLE_LABEL[ov.role as PersonRole]?.toLowerCase() ?? 'person'}`, kind: 'archive' }
+      : { text: `added a ${ROLE_LABEL[nv.role as PersonRole]?.toLowerCase() ?? 'person'}`, kind: 'create' }
+    case 'scripts': return e.action === 'create' ? { text: `wrote script version ${nv.version}`, kind: 'create' }
+      : e.changed_fields.includes('status') ? { text: `marked script v${nv.version ?? ''} as ${String(nv.status).replace('_', ' ')}`.replace('v ', ''), kind: 'status' } : { text: 'edited the script', kind: 'update' }
+    case 'edit_versions': return { text: `added edit v${nv.version}`, kind: 'create' }
+    case 'script_comments': return { text: nv.from_client ? `logged client feedback${nv.author_name ? ` from ${nv.author_name}` : ''}` : 'commented on the script', kind: 'update' }
     case 'campaign_promo_codes':
       return e.action === 'create' ? { text: `added promo code ${nv.code}`, kind: 'create' } : e.action === 'archive' ? { text: 'removed a promo code', kind: 'archive' } : null
     case 'campaign_finances':

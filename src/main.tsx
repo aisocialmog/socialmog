@@ -20,6 +20,9 @@ import { CampaignsPage } from './pages/campaigns/CampaignsPage'
 import { CampaignDetail } from './pages/campaigns/CampaignDetail'
 import { CampaignForm } from './pages/campaigns/CampaignForm'
 import { CampaignReport } from './pages/campaigns/CampaignReport'
+import { MyWork, ProductionBoard } from './pages/production/ProductionPage'
+import { ProductionForm, ProductionItem } from './pages/production/ProductionItem'
+import { CalendarPage, SharedCalendar } from './pages/production/CalendarPage'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -64,7 +67,12 @@ function Protected() {
           <Route path="/campaigns/:id" element={<CampaignDetail />} />
           <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
           <Route path="/campaigns/:id/report" element={<CampaignReport />} />
-          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns'].includes(n.to)).map(n => (
+          <Route path="/production" element={<ProductionBoard />} />
+          <Route path="/production/mine" element={<MyWork />} />
+          <Route path="/production/new" element={<ProductionForm />} />
+          <Route path="/production/:id" element={<ProductionItem />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />
@@ -91,6 +99,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/share/calendar/:token" element={<SharedCalendar />} />
             <Route path="/*" element={<Protected />} />
           </Routes>
         </BrowserRouter>

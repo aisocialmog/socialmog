@@ -3,7 +3,7 @@
 Internal database and management site for **Social Mog**, an influencer production and campaign agency in India.
 It keeps brands, creators, campaigns, production, tasks and money in one place, and calculates every total from the records.
 
-**Status:** features 1 (login, roles, layout, activity log), 2 (Brands), 3 (Creators) and 4 (Campaigns) are built. The database schema for every later feature is already in place.
+**Status:** features 1 (login, roles, layout, activity log), 2 (Brands), 3 (Creators), 4 (Campaigns) and 5 (Production & calendar) are built. The database schema for every later feature is already in place.
 
 ![Dashboard shell](docs/preview/dashboard-founder.png)
 
@@ -110,6 +110,23 @@ The periods are `this_week`, `last_week`, `this_month`, `last_month`, `this_quar
 ### Sample campaign
 - **Add it:** run `supabase/samples/sample_campaign.sql`, after the sample brands and creators scripts.
 - **Remove it:** run `supabase/samples/remove_sample_campaign.sql` before removing the sample brands or creators.
+
+## Production & content calendar (feature 5)
+
+- **One record for both:** a production item is a deliverable (brand required, campaign optional), so a campaign deliverable and its production work are the same record.
+- **Stages:** Idea → Script → Script approved → Pre-production → Shoot scheduled → Shot → Editing → Internal review → Client review → Revisions → Approved → Scheduled → Posted.
+  - Every move is written to the activity log with its time.
+  - `production_stage_durations` and `production_stage_turnaround` turn that log into time per stage and average days per stage (e.g. edit turnaround).
+- **Flags:**
+  - An item stuck in one stage for more than 3 days is flagged; the 3 is `org_settings.stuck_after_days`.
+  - Items past their target post date are flagged.
+  - When revision rounds go over the limit (`brands.revision_limit`, or the item's own limit), an "over the limit — bill the extra rounds" warning shows.
+- **People:** scriptwriter, talent, shooter and editor, each a team member, freelancer, vendor or creator. Team members and freelancers named on an item can see it and find it in **My work**.
+- **Script:** rich text with every version kept, and comments on each version, marked as from the team or the client.
+- **Files:** links for raw footage, final file, thumbnail and live post, plus numbered edit versions. The newest edit also becomes the campaign tracker's draft link.
+- **Shoot:** date, time, location, equipment list and call sheet notes.
+- **Content calendar** (`/calendar`): month and week views, colour-coded by brand. Each brand keeps a fixed colour slot from creation (`brands.calendar_color`). Drag a post or shoot with the mouse to reschedule it.
+- **Client calendar link:** "Share with client" creates a read-only link, `/share/calendar/<token>`. Only a SHA-256 of the token is stored, and the link can expire or be turned off. The public function returns titles, formats, dates, a simple status and live links — never money, briefs, notes, people or locations.
 
 ## Setting it up
 
