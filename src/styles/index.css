@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Palette (the only colours in the app) ─────────────────── */
+:root {
+  --sumi: #1E1C1A; --sumi-light: #2A2724; --sumi-raised: #34302C;
+  --kaki: #E3793A; --akane: #B7282E; --yamabuki: #F2A93B;
+  --kinari: #F2E8D5; --hai: #8F877F; --washi: #F7F1E6;
+  --sunset: linear-gradient(90deg, var(--akane), var(--kaki) 55%, var(--yamabuki));
+  --ease-calm: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Semantic tokens as "r g b" so Tailwind can apply opacity.
+   muted = hai blended toward the text colour, so secondary text stays ≥ 4.5:1
+   (pure hai is only used for hairlines and on the base background). */
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: 30 28 26;          /* sumi */
+  --card: 42 39 36;        /* sumi-light */
+  --raised: 52 48 44;      /* sumi-raised */
+  --ink: 242 232 213;      /* kinari */
+  --muted: 173 164 153;    /* hai 70% + kinari — 6.0:1 on cards */
+  --line: 143 135 127;     /* hai */
+  --accent: 227 121 58;    /* kaki */
+  --accent-ink: 227 121 58;/* kaki as text — 5.0:1 on cards */
+  --alert: 183 40 46;      /* akane (fills; text on it is kinari) */
+}
+[data-theme='washi'] {
+  color-scheme: light;
+  --bg: 247 241 230;       /* washi */
+  --card: 242 232 213;     /* kinari */
+  --raised: 236 224 202;   /* kinari, slightly deeper (kinari 90% + hai) */
+  --ink: 30 28 26;         /* sumi */
+  --muted: 92 87 82;       /* hai 55% + sumi — 5.9:1 on kinari */
+  --line: 143 135 127;     /* hai */
+  --accent: 227 121 58;    /* kaki (fills, with sumi text on top) */
+  --accent-ink: 183 40 46; /* kaki text fails on paper (2.7:1) → akane 5.2:1 */
+  --alert: 183 40 46;
+}
+
+html, body, #root { min-height: 100%; }
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+  font-feature-settings: 'palt' 0;
+}
+/* faint paper fibres in washi mode (inline SVG noise, ~4% opacity) */
+[data-theme='washi'] body {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9 .04' numOctaves='2' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 .56 0 0 0 0 .53 0 0 0 0 .5 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)'/%3E%3C/svg%3E");
+}
+
+h1, h2, h3, .font-mincho { font-family: 'Shippori Mincho', serif; letter-spacing: 0.01em; }
+.num { font-variant-numeric: tabular-nums lining-nums; font-feature-settings: 'tnum' 1, 'lnum' 1; }
+
+@layer components {
+/* Shoji card */
+.shoji { @apply bg-card border border-line/30 rounded-shoji; }
+.shoji-pad { @apply p-5 sm:p-6; }
+
+/* Buttons */
+.btn { @apply inline-flex items-center gap-2 rounded-shoji px-4 h-10 text-sm font-medium transition-all duration-calm ease-calm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg; }
+.btn-primary { @apply btn bg-accent text-sumi; }
+.btn-primary:hover { background-image: var(--sunset); }
+.btn-ghost { @apply btn text-ink border border-line/40 hover:bg-raised; }
+.icon-btn { @apply inline-flex items-center justify-center w-10 h-10 rounded-shoji text-muted hover:text-ink hover:bg-raised transition-colors duration-calm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent; }
+
+.field { @apply h-10 w-full rounded-shoji bg-bg border border-line/40 px-3 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/70 focus:border-transparent; }
+
+.pill { @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap; }
+
+.eyebrow { @apply text-[11px] uppercase tracking-[0.18em] text-muted; }
+
+}
+
+/* Soft entrance */
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: rise 400ms var(--ease-calm) both; }
+
+/* Hanko stamp */
+@keyframes stamp {
+  0%   { opacity: 0; transform: scale(1.5) rotate(-14deg); }
+  60%  { opacity: 1; transform: scale(0.97) rotate(-8deg); }
+  100% { opacity: 1; transform: scale(1) rotate(-8deg); }
+}
+.hanko-in { animation: stamp 380ms var(--ease-calm) both; }
+
+/* Ensō spinner: the brush circle draws itself, then fades */
+@keyframes enso-draw { 0% { stroke-dashoffset: 300; opacity: .2 } 60% { stroke-dashoffset: 18; opacity: 1 } 100% { stroke-dashoffset: 18; opacity: 0 } }
+.enso-spin path { stroke-dasharray: 300; animation: enso-draw 1.8s var(--ease-calm) infinite; }
+
+/* Seasonal drift */
+@keyframes drift {
+  0%   { transform: translate3d(0, -10%, 0) rotate(0deg); opacity: 0; }
+  10%  { opacity: .85; }
+  100% { transform: translate3d(var(--dx, 40px), 110vh, 0) rotate(var(--rot, 220deg)); opacity: 0; }
+}
+@keyframes glow { 0%,100% { opacity: .15 } 50% { opacity: .9 } }
+@keyframes twinkle { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  .seasonal-layer { display: none; }
+}
+[data-reduce-motion='true'] *, [data-reduce-motion='true'] *::before { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+[data-reduce-motion='true'] .seasonal-layer { display: none; }
+
+/* thin scrollbars that match */
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--line) / .4) transparent; }
