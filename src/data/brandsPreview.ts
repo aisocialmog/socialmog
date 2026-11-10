@@ -70,6 +70,7 @@ function overview(b: BrandRow): BrandOverview {
   return {
     ...b, owner_name: owner?.name ?? null, owner_photo_path: null,
     lifetime_revenue: 0, received: 0, outstanding: 0, overdue: 0, active_campaigns: 0, total_campaigns: 0,
+    historical_revenue: b.id === 'b1' ? 450000 : 0, historical_campaigns: b.id === 'b1' ? 3 : 0,
     primary_contact_id: pc?.id ?? null, primary_contact_name: pc?.name ?? null, primary_contact_email: pc?.email ?? null, primary_contact_phone: pc?.phone ?? null,
     retainer_id: r?.id ?? null, retainer_status: r?.status ?? null, monthly_fee: r?.monthly_fee ?? null, retainer_start_date: r?.start_date ?? null,
     billing_day: r?.billing_day ?? null, renewal_date: r?.renewal_date ?? null, days_to_renewal: days,

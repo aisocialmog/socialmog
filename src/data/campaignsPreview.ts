@@ -106,7 +106,7 @@ function summary(c: Camp): CampaignSummary {
   return {
     campaign_id: c.id, brand_id: c.brand_id, brand_name: BRANDS[c.brand_id] ?? c.brand_id, brand_logo_path: null, name: c.name, code: c.code, kind: c.kind,
     objective: c.objective, status: c.status, platforms: c.platforms, start_date: c.start_date, end_date: c.end_date, owner_id: c.owner_id,
-    owner_name: c.owner_id ? OWNERS[c.owner_id] ?? null : null, is_archived: c.is_archived, updated_at: c.updated_at, created_at: c.created_at, completed_at: c.completed_at,
+    owner_name: c.owner_id ? OWNERS[c.owner_id] ?? null : null, is_archived: c.is_archived, updated_at: c.updated_at, created_at: c.created_at, completed_at: c.completed_at, is_historical: false,
     client_budget: fin?.contract_value ?? null, planned_creator_spend: fin?.creator_budget ?? null, planned_production_spend: fin?.production_budget ?? null,
     expected_margin: fin?.contract_value != null ? fin.contract_value - (fin.creator_budget ?? 0) - (fin.production_budget ?? 0) : null,
     creators: mine.filter(x => x.status !== 'dropped').length, confirmed_creators: mine.filter(x => isConfirmed(x.status)).length, actual_creator_spend: actual,

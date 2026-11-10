@@ -323,9 +323,9 @@ function History({ creatorId, staff }: { creatorId: string; staff: boolean }) {
         <tbody className="divide-y divide-line/15">
           {data.map(h => (
             <tr key={h.campaign_creator_id}>
-              <td className="px-5 py-3"><span className="text-ink">{h.campaign_name}</span><span className="block text-xs text-muted">{h.brand_name}{h.start_date ? ` · ${formatDate(h.start_date)}` : ''}</span></td>
+              <td className="px-5 py-3"><span className="text-ink">{h.campaign_name}{h.is_historical && <> <Pill tone="quiet">History</Pill></>}</span><span className="block text-xs text-muted">{h.brand_name}{h.start_date ? ` · ${formatDate(h.start_date)}` : ''}</span></td>
               <td className="px-3 py-3">{h.campaign_status === 'completed' ? <Hanko kind="completed" size={34} animate={false} /> : <Pill>{h.creator_status.replace(/_/g, ' ')}</Pill>}</td>
-              {staff && <td className="px-3 py-3 text-right num text-ink">{h.agreed_fee != null ? formatINR(h.agreed_fee) : '—'}</td>}
+              {staff && <td className="px-3 py-3 text-right num text-ink">{h.agreed_fee != null ? formatINR(h.agreed_fee) : '—'}{h.is_historical && <span className="block text-xs text-muted">historical fee</span>}</td>}
               {staff && <td className="px-3 py-3 text-right num text-ink">{formatINR(h.paid)}</td>}
               <td className="px-3 py-3 text-right num text-muted">{h.live} / {h.deliverables}</td>
               <td className="px-5 py-3 text-right num text-ink">{formatCount(h.total_views)}</td>

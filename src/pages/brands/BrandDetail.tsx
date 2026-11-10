@@ -92,6 +92,9 @@ export function BrandDetail() {
           <Stat label="Retainer" value={b.monthly_fee ? `${formatINR(b.monthly_fee)}/mo` : '—'} hint={b.renewal_date ? `Renews ${formatDate(b.renewal_date)}` : undefined} />
         </dl>
       )}
+      {money && b.historical_campaigns > 0 && (
+        <p className="text-sm text-muted -mt-3">Before go-live: <span className="num text-ink">{formatINR(b.historical_revenue)}</span> across <span className="num">{b.historical_campaigns}</span> past campaign{b.historical_campaigns === 1 ? '' : 's'} (history — not in money reports)</p>
+      )}
 
       <div role="tablist" aria-label="Brand sections" className="flex gap-1 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 border-b border-line/25">
         {tabs.map(t => (

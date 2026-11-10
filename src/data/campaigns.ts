@@ -14,6 +14,7 @@ export interface CampaignSummary {
   is_archived: boolean; updated_at: string; created_at: string; completed_at: string | null
   client_budget: number | null; planned_creator_spend: number | null; planned_production_spend: number | null; expected_margin: number | null
   creators: number; confirmed_creators: number; actual_creator_spend: number | null
+  is_historical: boolean   // imported pre-go-live history: money is for the record only
   client_billing: number; received: number; creator_payouts: number; production_expenses: number; profit: number | null
   deliverables: number; posted: number; overdue: number; approved: number
   views: number | null; reach: number | null; engagements: number | null; likes: number | null; comments: number | null

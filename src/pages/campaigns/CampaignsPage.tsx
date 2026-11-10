@@ -137,7 +137,7 @@ export function CampaignsPage() {
               <Link to={`/campaigns/${c.campaign_id}`} className="p-4 sm:px-5 grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_9rem_8rem_8rem] gap-x-4 gap-y-2 items-center hover:bg-raised/50 transition-colors duration-calm">
                 <BrandLogo name={c.brand_name} path={c.brand_logo_path} size={40} />
                 <div className="min-w-0">
-                  <p className="text-ink font-medium">{c.name}</p>
+                  <p className="text-ink font-medium">{c.name}{c.is_historical && <> <Pill tone="quiet">History</Pill></>}</p>
                   <p className="text-xs text-muted">{c.brand_name} · {KIND_LABEL[c.kind]} · {dates(c)}{c.owner_name ? ` · ${c.owner_name}` : ''}</p>
                   <div className="flex flex-wrap gap-1.5 mt-1.5 md:hidden"><Pill tone={CAMPAIGN_STATUS_TONE[c.status]}>{CAMPAIGN_STATUS_LABEL[c.status]}</Pill>{c.overdue > 0 && <Pill tone="alert">{c.overdue} overdue</Pill>}</div>
                 </div>

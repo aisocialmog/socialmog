@@ -18,6 +18,7 @@ export interface BrandOverview {
   billing_address: string | null; payment_terms_days: number | null; notes: string | null
   lifetime_revenue: number; received: number; outstanding: number; overdue: number
   active_campaigns: number; total_campaigns: number
+  historical_revenue: number; historical_campaigns: number   // imported pre-go-live history — never in money reports
   primary_contact_id: string | null; primary_contact_name: string | null; primary_contact_email: string | null; primary_contact_phone: string | null
   retainer_id: string | null; retainer_status: string | null; monthly_fee: number | null; retainer_start_date: string | null
   billing_day: number | null; renewal_date: string | null; days_to_renewal: number | null; renewal_warning: boolean

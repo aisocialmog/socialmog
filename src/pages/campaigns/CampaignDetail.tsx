@@ -61,8 +61,10 @@ export function CampaignDetail() {
               <h1 className="font-mincho text-3xl text-ink break-words">{s.name}</h1>
               {s.status === 'completed' ? <Hanko kind="completed" size={44} animate={false} /> : <Pill tone={CAMPAIGN_STATUS_TONE[s.status]}>{CAMPAIGN_STATUS_LABEL[s.status]}</Pill>}
               {s.is_archived && <Pill tone="ink">Archived</Pill>}
+              {s.is_historical && <Pill tone="quiet">History</Pill>}
             </div>
             <p className="text-sm text-muted mt-1">{[s.brand_name, KIND_LABEL[s.kind], s.objective && OBJECTIVE_LABEL[s.objective], s.start_date && `${formatDate(s.start_date)}${s.end_date ? ` – ${formatDate(s.end_date)}` : ''}`].filter(Boolean).join(' · ')}</p>
+            {s.is_historical && <p className="text-sm text-muted mt-1">Imported history from before go-live — its money figures are for the record and aren't in any money report.</p>}
             {s.owner_name && <p className="text-sm text-muted mt-0.5">Owner: <span className="text-ink">{s.owner_name}</span></p>}
           </div>
         </div>

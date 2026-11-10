@@ -42,7 +42,7 @@ export interface Snapshot { creator_platform_id: string; captured_on: string; fo
 export interface HistoryRow {
   campaign_creator_id: string; campaign_id: string; campaign_name: string; campaign_status: string; creator_status: string
   start_date: string | null; end_date: string | null; brand_id: string; brand_name: string
-  agreed_fee: number | null; paid: number; deliverables: number; live: number; total_views: number | null
+  agreed_fee: number | null; is_historical: boolean; paid: number; deliverables: number; live: number; total_views: number | null
 }
 export interface PayoutRow { payout_id: string; campaign_id: string | null; status: string; due_date: string | null; paid_on: string | null; gross: number; tds: number; net_payable: number }
 export interface Shortlist { id: string; name: string; notes: string | null; brand_id: string | null; campaign_id: string | null; created_at: string; count: number }
