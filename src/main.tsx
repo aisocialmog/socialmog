@@ -30,6 +30,7 @@ import { ExpenseDetail, ExpensesPage } from './pages/money/Expenses'
 import { PayoutDetail, PayoutsDue, PayoutsPage } from './pages/money/Payouts'
 import { AccountDetail, AccountsPage, CapitalDetail, CapitalPage } from './pages/money/CapitalAccounts'
 import { MoneyReports, MoneySettings } from './pages/money/ReportsSettings'
+import { OpeningWizard } from './pages/opening/OpeningWizard'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
 import { ForgotPassword } from './pages/auth/ForgotPassword'
@@ -58,6 +59,7 @@ function Protected() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/settings/opening" element={<OpeningWizard />} />
           <Route path="/brands" element={<BrandsPage />} />
           <Route path="/brands/new" element={<BrandForm />} />
           <Route path="/brands/:id" element={<BrandDetail />} />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { Avatar } from '../components/ui/Avatar'
 import { Card, EmptyState, MoreMenu, Pill } from '../components/ui/kit'
 import { Icon } from '../components/ui/Icon'
@@ -40,6 +41,15 @@ export function Settings() {
         </div>
       )}
       {tab === 'profile' ? <Profile /> : <Team />}
+      {role === 'founder' && (
+        <Link to="/settings/opening" className="shoji shoji-pad flex items-center justify-between gap-4 hover:bg-raised/60 transition-colors duration-calm">
+          <span className="min-w-0">
+            <span className="block text-ink font-medium">Opening balances &amp; import — one-time setup</span>
+            <span className="block text-sm text-muted mt-0.5">Set the go-live date, opening capital, account balances and unpaid items from before. Founders only.</span>
+          </span>
+          <Icon name="chevronRight" className="text-muted shrink-0" />
+        </Link>
+      )}
       <p className="text-xs text-muted">Company details, security, backups and API keys arrive with feature 13.</p>
     </div>
   )

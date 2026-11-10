@@ -40,9 +40,15 @@ begin
     if auth.uid() is not null and not is_founder() then
       raise exception 'Only founders can change the go-live date or the opening balances lock';
     end if;
-    if old.opening_locked_at is not null and new.opening_locked_at is not null
-       and new.go_live_date is distinct from old.go_live_date then
+    if old.opening_locked_at is not null and new.go_live_date is distinct from old.go_live_date then
       raise exception 'Opening balances are locked — unlock them first';
+    end if;
+    -- locking (needs the check to balance) and re-opening (needs a fresh password)
+    -- only through opening_lock() / opening_unlock()
+    if auth.uid() is not null
+       and (new.opening_locked_at, new.opening_locked_by) is distinct from (old.opening_locked_at, old.opening_locked_by)
+       and coalesce(current_setting('app.opening_lock_change', true), '') <> 'on' then
+      raise exception 'Lock or re-open opening balances from the wizard';
     end if;
   end if;
   return new;
@@ -55,7 +61,14 @@ create or replace function public.opening_item_guard()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare s org_settings;
 begin
-  if not new.is_opening or (tg_op = 'UPDATE' and old.is_opening) then return new; end if;
+  if tg_op = 'UPDATE' then
+    -- flipping the flag would turn an old debt into new revenue / cost (or back)
+    if new.is_opening is distinct from old.is_opening then
+      raise exception 'Whether this is an opening balance can’t change — remove it and add it again';
+    end if;
+    return new;
+  end if;
+  if not new.is_opening then return new; end if;
   select * into s from org_settings limit 1;
   if auth.uid() is not null and not is_founder() then raise exception 'Only founders add opening balances'; end if;
   if s.go_live_date is null then raise exception 'Set the go-live date first'; end if;
@@ -388,7 +401,8 @@ begin
   update capital_entries set is_archived = true, change_reason = 'Opening balances wizard: capital re-entered'
    where opening_part in ('accumulated_profit','founder_money') and not is_archived;
   for r in select * from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) loop
-    v_f := (r->>'founder_id')::uuid;
+    v_f := nullif(r->>'founder_id', '')::uuid;
+    if v_f is null then raise exception 'Say which founder each amount belongs to'; end if;
     v_p := coalesce((r->>'accumulated_profit')::numeric, 0);
     v_m := coalesce((r->>'own_money')::numeric, 0);
     if v_p < 0 or v_m < 0 then raise exception 'Amounts can’t be negative — use an opening adjustment for a loss'; end if;
@@ -538,7 +552,9 @@ begin
   if abs(v_diff) >= 1 then
     raise exception 'The opening balances are ₹% apart — fix them or add an opening adjustment first', abs(v_diff);
   end if;
+  perform set_config('app.opening_lock_change', 'on', true);
   update org_settings set opening_locked_at = now(), opening_locked_by = current_member_id() where singleton;
+  perform set_config('app.opening_lock_change', '', true);
 end $$;
 
 -- Re-open: a founder who has just typed their password (the app signs in again
@@ -554,7 +570,9 @@ begin
   if v_at is null or extract(epoch from now()) - v_at > 600 then
     raise exception 'Confirm with your password to re-open opening balances';
   end if;
+  perform set_config('app.opening_lock_change', 'on', true);
   update org_settings set opening_locked_at = null, opening_locked_by = null where singleton;
+  perform set_config('app.opening_lock_change', '', true);
 end $$;
 
 -- ─────────────────────────────────────────────────────────────
