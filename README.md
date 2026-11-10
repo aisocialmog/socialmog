@@ -151,6 +151,22 @@ Founders see everything. Managers see invoices, payments, expenses, payouts and 
   - Money rows can't be hard-deleted, even by the database owner. The sample-removal scripts are the one exception, using `app.allow_money_delete`.
 - `src/lib/money.ts` repeats the same sums for the preview; `tests/money.test.ts` runs the SQL test's scenario through it and expects the same numbers.
 
+## Opening balances & import (feature 7)
+
+Founders only. A one-time wizard at **Settings → Opening balances & import** (`/settings/opening`) brings the books in as they stand on go-live. Migration: `supabase/migrations/20261115000100_opening_balances.sql`.
+
+- **Step 1, go-live date:** saved as `org_settings.go_live_date`. Everything before it is history; from it onwards is tracked in detail.
+- **Step 2, opening capital:** each founder's share of profit made before go-live, plus the money they put in personally. Saved as `capital_entries` of kind Opening capital (`opening_part`: `accumulated_profit` / `founder_money` / `adjustment`), dated the day before go-live. It is capital, never revenue or profit.
+- **Step 3, account balances:** each account's actual balance on go-live day, saved as `money_accounts.opening_balance`. The check: account balances + money owed to us − money we owe must equal opening capital. A difference is shown and can be closed with an **Opening adjustment** entry, which needs a note and may be negative.
+- **Step 4, open items:**
+  - **Invoices** unpaid from before go-live (`invoices.is_opening`) keep their original number. The amount still owed is entered as one figure, with no GST added. Collecting them reduces receivables and is never revenue on either basis.
+  - **Creator and freelancer dues** still unpaid (`creator_payouts.is_opening`). Paying them is never a cost of the new period.
+- **Step 5, history import (CSV, with column mapping):** old brands, creators (through the existing creator importer), past campaigns and who was on each. Past campaigns are flagged `campaigns.is_historical`, and their money sits only in the campaign's budget figures. Brand and creator pages show them as historical figures; no money report includes them.
+- **Finish:**
+  - **Lock** with `opening_lock()`, which refuses while the check is ₹1 or more apart.
+  - The summary from `opening_state()` shows capital per founder, account balances, receivables and payables.
+  - **Re-opening** needs a founder's password. The app signs in again, and `opening_unlock()` only accepts a login that used a password in the last 10 minutes. Founders who only use Google must set a password first.
+
 ## Setting it up
 
 1. **Founders:** put both founder names and emails in `supabase/migrations/20261109000800_seed_founders.sql`. The push stops with an error while the placeholders are still there.
@@ -166,7 +182,8 @@ Founders see everything. Managers see invoices, payments, expenses, payouts and 
    The service-role key is provided to the function automatically; it never goes in the app.
 5. **First logins:** invite both founder emails once from the dashboard (Authentication → Users → Invite user). Their logins link to the seeded rows. From then on, founders invite everyone from **Settings → Team**.
 6. **Money settings:** in the app, Money → Settings — our GST state, GSTIN (or leave blank), legal name, address, bank details, UPI ID and logo. Add each account's opening balance and the matching opening capital so the balance check is green.
-7. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
+7. **Opening balances:** run the wizard once (Settings → Opening balances & import) before entering day-to-day records.
+8. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
 
 ```bash
 npm install
