@@ -135,7 +135,7 @@ select pg_temp.expect('setting the same balance again changes nothing', pg_temp.
 select opening_add_invoice('b0000000-0000-0000-0000-0000000000a1', 'OLD/25-26/041', '2026-10-15', '2026-10-30', 59000, null) as oinv \gset
 select pg_temp.expect('opening invoice: sent, keeps its number, no GST',
   (select format('%s|%s|%s|%s|%s|%s', is_opening, document_status, invoice_number, total, gst_total, outstanding) from invoice_totals where invoice_id = :'oinv'),
-  'true|sent|OLD/25-26/041|59000.00|0|59000.00');
+  't|sent|OLD/25-26/041|59000.00|0|59000.00');
 select pg_temp.expect('no SM/ number consumed',
   (select next_value from document_sequences where doc_type = 'invoice' and fy_label = '2026-27'), :seq0);
 select pg_temp.expect('receivables moved by 59000', pg_temp.tot('receivables') - :rec0, 59000::numeric);
@@ -180,7 +180,7 @@ select pg_temp.expect('the cancelled check invoice leaves P&L as it was', pg_tem
 -- ── 7. Step 4b: unpaid creator / freelancer dues ────────────
 select opening_add_payout('c0000000-0000-0000-0000-0000000000a1', null, 20000, 10, '2026-12-10', 'Reel for Masala Co, Oct 2026') as opay \gset
 select pg_temp.expect('opening payout: pending, flagged',
-  (select format('%s|%s|%s|%s', status, is_opening, amount, tds_rate) from creator_payouts where id = :'opay'), 'pending|true|20000.00|10.00');
+  (select format('%s|%s|%s|%s', status, is_opening, amount, tds_rate) from creator_payouts where id = :'opay'), 'pending|t|20000.00|10.00');
 select pg_temp.expect('payables moved by 20000', pg_temp.tot('payables') - :pay0, 20000::numeric);
 select pg_temp.expect('listed as a payable',
   (select format('%s|%s|%s', p->>'payee_name', p->>'amount', p->>'status') from jsonb_array_elements(opening_state()->'payables') p where p->>'payout_id' = :'opay'),
@@ -219,7 +219,7 @@ select pg_temp.expect('is balanced', (opening_state()->'totals'->>'is_balanced')
 select opening_add_invoice('b0000000-0000-0000-0000-0000000000a2', 'OLD/25-26/060', '2026-09-01', null, 1000, 'Typed by mistake') as oinv2 \gset
 select opening_remove('invoice', :'oinv2');
 select pg_temp.expect('removing an opening invoice archives it',
-  (select format('%s|%s', is_archived, (select count(*) from invoice_totals where invoice_id = :'oinv2')) from invoices where id = :'oinv2'), 'true|0');
+  (select format('%s|%s', is_archived, (select count(*) from invoice_totals where invoice_id = :'oinv2')) from invoices where id = :'oinv2'), 't|0');
 select opening_add_adjustment(123, 'temporary') as adj2 \gset
 select opening_remove('adjustment', :'adj2');
 select pg_temp.expect('removing an adjustment archives it', (select is_archived from capital_entries where id = :'adj2'), true);
@@ -258,7 +258,7 @@ select pg_temp.expect('a paid due is still in the summary', pg_temp.tot('payable
 -- ── 10. Lock ────────────────────────────────────────────────
 select opening_lock();
 select pg_temp.expect('locked: who and when',
-  (select format('%s|%s', opening_state()->>'locked_at' is not null, opening_state()->>'locked_by_name')), 'true|Founder One');
+  (select format('%s|%s', opening_state()->>'locked_at' is not null, opening_state()->>'locked_by_name')), 't|Founder One');
 select pg_temp.expect_error('locked: go-live', $q$select opening_set_go_live('2026-12-02')$q$, '%locked%');
 select pg_temp.expect_error('locked: capital', format($q$select opening_save_capital('[{"founder_id":"%s","accumulated_profit":1}]')$q$, :'f1'), '%locked%');
 select pg_temp.expect_error('locked: balances', $q$select opening_set_balances('[]')$q$, '%locked%');
@@ -322,7 +322,7 @@ select pg_temp.expect('error says it starts after go-live', (select e->>'problem
 select pg_temp.expect('past campaigns: historical, completed, budget figures',
   (select string_agg(format('%s/%s/%s/%s/%s/%s/%s', c.name, c.is_historical, c.status, c.kind, c.end_date, f.contract_value, coalesce(f.creator_budget::text, '-')), ' ' order by c.name)
    from campaigns c join campaign_finances f on f.campaign_id = c.id where c.name in ('Diwali 2025', 'Summer 2026')),
-  'Diwali 2025/true/completed/influencer/2025-10-31/150000.00/90000.00 Summer 2026/true/completed/ugc/2026-05-01/50000.00/-');
+  'Diwali 2025/t/completed/influencer/2025-10-31/150000.00/90000.00 Summer 2026/t/completed/ugc/2026-05-01/50000.00/-');
 select pg_temp.expect('re-importing skips', (select import_history_campaigns('[{"brand":"Old Brand A","name":"diwali 2025"}]')->>'skipped'), '1');
 select pg_temp.expect('brand page shows the history',
   (select string_agg(format('%s:%s/%s/%s', name, historical_revenue, historical_campaigns, lifetime_revenue), ' ' order by name) from brand_overview where name like 'Old Brand %'),
@@ -348,7 +348,7 @@ select pg_temp.expect('creator on a past campaign: paid, with the fee',
    where cc.creator_id = 'c0000000-0000-0000-0000-0000000000b1'), 'paid|45000.00');
 select pg_temp.expect('creator history shows it',
   (select format('%s|%s|%s|%s', campaign_name, brand_name, is_historical, agreed_fee) from creator_campaign_history where creator_id = 'c0000000-0000-0000-0000-0000000000b1'),
-  'Diwali 2025|Old Brand A|true|45000.00');
+  'Diwali 2025|Old Brand A|t|45000.00');
 select pg_temp.expect('re-importing a creator skips',
   (select import_history_campaign_creators('[{"campaign":"Diwali 2025","creator":"Hist Creator","fee":"45000"}]')->>'skipped'), '1');
 select pg_temp.expect('creator history is not money', pg_temp.pnl('invoice'), :'pnl_inv0');
