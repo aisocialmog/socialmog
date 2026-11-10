@@ -167,6 +167,8 @@ Founders only. A one-time wizard at **Settings → Opening balances & import** (
   - The summary from `opening_state()` shows capital per founder, account balances, receivables and payables.
   - **Re-opening** needs a founder's password. The app signs in again, and `opening_unlock()` only accepts a login that used a password in the last 10 minutes. Founders who only use Google must set a password first.
 
+- **Tests:** `supabase/tests/opening_test.sql`, `tests/opening.test.ts`, `tests/historyImport.test.ts`.
+
 ## Setting it up
 
 1. **Founders:** put both founder names and emails in `supabase/migrations/20261109000800_seed_founders.sql`. The push stops with an error while the placeholders are still there.
@@ -181,8 +183,8 @@ Founders only. A one-time wizard at **Settings → Opening balances & import** (
 
    The service-role key is provided to the function automatically; it never goes in the app.
 5. **First logins:** invite both founder emails once from the dashboard (Authentication → Users → Invite user). Their logins link to the seeded rows. From then on, founders invite everyone from **Settings → Team**.
-6. **Money settings:** in the app, Money → Settings — our GST state, GSTIN (or leave blank), legal name, address, bank details, UPI ID and logo. Add each account's opening balance and the matching opening capital so the balance check is green.
-7. **Opening balances:** run the wizard once (Settings → Opening balances & import) before entering day-to-day records.
+6. **Money settings:** in the app, Money → Settings — our GST state, GSTIN (or leave blank), legal name, address, bank details, UPI ID and logo.
+7. **Opening balances:** run the wizard once (Settings → Opening balances & import) before entering day-to-day records. It sets the go-live date, opening capital, each account's opening balance and anything still unpaid, and checks they agree.
 8. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
 
 ```bash
