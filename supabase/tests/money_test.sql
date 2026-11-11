@@ -135,6 +135,9 @@ select pg_temp.expect('net payable = amount − TDS', (select net_payable from p
 update creator_payouts set status = 'approved' where id = '90000000-0000-0000-0000-0000000000a1';
 select pg_temp.expect('approving needs no reason and records who', (select approved_by_name from payout_list where id = '90000000-0000-0000-0000-0000000000a1'), 'Founder One');
 select pg_temp.expect_error('paying needs the account', $q$update creator_payouts set status = 'paid' where id = '90000000-0000-0000-0000-0000000000a1'$q$);
+select pg_temp.expect_error('poka-yoke: no payout to a creator without UPI or bank details',
+  $q$update creator_payouts set status = 'paid', paid_on = '2026-11-08', account_id = 'a0000000-0000-0000-0000-0000000000a1' where id = '90000000-0000-0000-0000-0000000000a1'$q$);
+insert into creator_payment_details (creator_id, upi_id) values ('c0000000-0000-0000-0000-0000000000a1', 'test@upi');
 update creator_payouts set status = 'paid', paid_on = '2026-11-08', account_id = 'a0000000-0000-0000-0000-0000000000a1', reference = 'UTR-P1' where id = '90000000-0000-0000-0000-0000000000a1';
 select pg_temp.expect('paying creates the matching expense',
   (select format('%s|%s|%s|%s|%s', c.name, e.amount, e.tds_deducted, e.total - e.tds_deducted, e.notes) from expenses e join expense_categories c on c.id = e.category_id

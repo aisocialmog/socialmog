@@ -59,7 +59,11 @@ select pg_temp.expect('posted clears the overdue warning', (select overdue from 
 select pg_temp.expect('posting stamps went_live_at', (select went_live_at is not null from deliverables where id = '5a3b1e00-0000-4000-8000-0000000ca204'), true);
 
 -- status changes, completed stamp, history
+select pg_temp.expect_error('poka-yoke: can’t complete with unposted deliverables',
+  $q$update campaigns set status = 'completed' where id = '5a3b1e00-0000-4000-8000-0000000ca001'$q$);
+reset role; alter table campaigns disable trigger campaigns_zz_pokayoke; set role authenticated;   -- the rest of this block tests the stamp, not the guard
 update campaigns set status = 'completed' where id = '5a3b1e00-0000-4000-8000-0000000ca001';
+reset role; alter table campaigns enable trigger campaigns_zz_pokayoke; set role authenticated;
 select pg_temp.expect('completed_at stamped', (select completed_at is not null from campaigns where id = '5a3b1e00-0000-4000-8000-0000000ca001'), true);
 update campaigns set status = 'reporting' where id = '5a3b1e00-0000-4000-8000-0000000ca001';
 select pg_temp.expect('completed_at cleared when reopened', (select completed_at is null from campaigns where id = '5a3b1e00-0000-4000-8000-0000000ca001'), true);
