@@ -19,6 +19,13 @@ create temp table sc_ids on commit drop as
   union select e.id from public.edit_versions e join public.deliverables d on d.id = e.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
   union select s.id from public.scripts s join public.deliverables d on d.id = s.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
   union select c.id from public.script_comments c join public.scripts s on s.id = c.script_id join public.deliverables d on d.id = s.deliverable_id where d.campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001';
+-- what the automations made for the sample: template tasks, untouched auto-payouts, andon alerts
+delete from public.andons where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001'
+   or deliverable_id in (select id from public.deliverables where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001')
+   or task_id in (select id from public.tasks where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001');
+delete from public.task_assignees where task_id in (select id from public.tasks where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001' and source = 'automation');
+delete from public.tasks where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001' and source = 'automation';
+delete from public.creator_payouts where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001' and status = 'pending' and description like 'Auto:%';
 do $$
 begin
   if exists (select 1 from public.invoices where campaign_id = '5a3b1e00-0000-4000-8000-0000000ca001')

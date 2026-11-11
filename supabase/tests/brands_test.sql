@@ -72,6 +72,8 @@ insert into campaigns (id, brand_id, name) values ('5a3b1e00-0000-4000-8000-0000
 \set ON_ERROR_STOP 1
 \o /dev/null
 select pg_temp.expect('removal blocked while work is attached', (select count(*) from brands where id::text like '5a3b1e00-%'), 2::bigint);
+delete from task_assignees where task_id in (select id from tasks where campaign_id = '5a3b1e00-0000-4000-8000-00000000ca00');
+delete from tasks where campaign_id = '5a3b1e00-0000-4000-8000-00000000ca00';   -- made by the task-template automation
 delete from campaigns where id = '5a3b1e00-0000-4000-8000-00000000ca00';
 delete from activity_log where record_id = '5a3b1e00-0000-4000-8000-00000000ca00';
 \i supabase/samples/remove_sample_brands.sql

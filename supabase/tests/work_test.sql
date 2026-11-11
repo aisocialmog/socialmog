@@ -200,6 +200,61 @@ select pg_temp.expect('ask runs as the asker: team member sees no invoices', ask
 select pg_temp.expect('matcher is staff only', (select count(*) from creator_match((select pg_temp.asowner('select id from campaigns limit 1'))::uuid)), 0::bigint);
 select pg_temp.expect_error('team member: no weekly numbers', $q$select weekly_numbers()$q$);
 reset role;
+
+-- ── Automations ─────────────────────────────────────────────
+set role authenticated;
+select pg_temp.login(:MGR);
+select pg_temp.expect_error('manager can’t run automations', $q$select run_automation('reminders')$q$, '%Only a founder%');
+select pg_temp.expect_error('automation bodies aren’t callable directly', $q$select automation_reminders()$q$);
+select pg_temp.login(:F1);
+select pg_temp.expect('17 automations listed', (select count(*) from automations_list()), 17::bigint);
+select pg_temp.expect('every scheduled automation runs without error', (select count(*) from automations a where a.schedule is not null and a.key not in ('daily_digest','weekly_insight','month_end_close') and run_automation(a.key) like 'Failed%'), 0::bigint);
+select pg_temp.expect('runs are logged', (select count(*) >= 11 from automation_runs where was_manual), true);
+select pg_temp.expect('trigger automations explain themselves', run_automation('creator_paid'), 'Runs by itself when the record changes — nothing to run by hand.');
+-- templates → tasks on a new campaign
+insert into campaigns (id, brand_id, name, start_date, end_date, owner_id) select '5a3b1e00-0000-4000-8000-0000000cb001', 'b0000000-0000-0000-0000-0000000000a1', 'Automation Campaign', '2026-12-01', '2026-12-20', f1 from ids;
+select pg_temp.expect('template tasks created with relative due dates', (select string_agg(title || '@' || due_date, ', ' order by due_date) from tasks where campaign_id = '5a3b1e00-0000-4000-8000-0000000cb001'),
+  'Share brief with creators@2026-12-01, Collect drafts@2026-12-08, Send report@2026-12-23');
+update automations set is_enabled = false where key = 'campaign_tasks';
+insert into campaigns (id, brand_id, name) values ('5a3b1e00-0000-4000-8000-0000000cb002', 'b0000000-0000-0000-0000-0000000000a1', 'No Templates');
+select pg_temp.expect('switched off: no tasks', (select count(*) from tasks where campaign_id = '5a3b1e00-0000-4000-8000-0000000cb002'), 0::bigint);
+update automations set is_enabled = true where key = 'campaign_tasks';
+-- approval → payout at the agreed fee; posting → campaign live; paying → creator Paid
+insert into creators (id, name) values ('c0000000-0000-0000-0000-0000000000c1', 'Auto Creator');
+insert into creator_payment_details (creator_id, upi_id) values ('c0000000-0000-0000-0000-0000000000c1', 'auto@upi');
+insert into campaign_creators (id, campaign_id, creator_id, status) values ('cc000000-0000-0000-0000-0000000000c1', '5a3b1e00-0000-4000-8000-0000000cb001', 'c0000000-0000-0000-0000-0000000000c1', 'confirmed');
+insert into campaign_finances (campaign_id, contract_value, creator_budget) values ('5a3b1e00-0000-4000-8000-0000000cb001', 100000, 40000);
+insert into campaign_creator_fees (campaign_creator_id, agreed_fee) values ('cc000000-0000-0000-0000-0000000000c1', 20000);
+insert into deliverables (id, brand_id, campaign_id, campaign_creator_id, creator_id, title) values
+  ('d0000000-0000-0000-0000-0000000000c1', 'b0000000-0000-0000-0000-0000000000a1', '5a3b1e00-0000-4000-8000-0000000cb001', 'cc000000-0000-0000-0000-0000000000c1', 'c0000000-0000-0000-0000-0000000000c1', 'Auto Reel 1'),
+  ('d0000000-0000-0000-0000-0000000000c2', 'b0000000-0000-0000-0000-0000000000a1', '5a3b1e00-0000-4000-8000-0000000cb001', 'cc000000-0000-0000-0000-0000000000c1', 'c0000000-0000-0000-0000-0000000000c1', 'Auto Reel 2');
+update deliverables set approval_status = 'approved' where id = 'd0000000-0000-0000-0000-0000000000c1';
+select pg_temp.expect('approval creates a pending payout at the fee per deliverable', (select status || '|' || amount from creator_payouts where deliverable_id = 'd0000000-0000-0000-0000-0000000000c1'), 'pending|10000.00');
+update deliverables set approval_status = 'pending' where id = 'd0000000-0000-0000-0000-0000000000c1';
+update deliverables set approval_status = 'approved' where id = 'd0000000-0000-0000-0000-0000000000c1';
+select pg_temp.expect('approving twice doesn’t pay twice', (select count(*) from creator_payouts where deliverable_id = 'd0000000-0000-0000-0000-0000000000c1'), 1::bigint);
+update campaign_creator_fees set agreed_fee = 190000 where campaign_creator_id = 'cc000000-0000-0000-0000-0000000000c1';
+update deliverables set approval_status = 'approved' where id = 'd0000000-0000-0000-0000-0000000000c2';
+select pg_temp.expect('jidoka: thin margin stops the payout and lights an andon',
+  (select count(*) from creator_payouts where deliverable_id = 'd0000000-0000-0000-0000-0000000000c2') || '|' || (select count(*) from open_andons where automation_key = 'margin' and record_id = '5a3b1e00-0000-4000-8000-0000000cb001'), '0|1');
+select pg_temp.expect('…but the approval itself went through', (select approval_status from deliverables where id = 'd0000000-0000-0000-0000-0000000000c2'), 'approved');
+update deliverables set stage = 'live', live_url = 'https://instagram.com/p/auto1' where id = 'd0000000-0000-0000-0000-0000000000c1';
+select pg_temp.expect('first post → campaign Live', (select status from campaigns where id = '5a3b1e00-0000-4000-8000-0000000cb001'), 'live');
+update creator_payouts set status = 'paid', account_id = 'a0000000-0000-0000-0000-0000000000a1' where deliverable_id = 'd0000000-0000-0000-0000-0000000000c1';
+select pg_temp.expect('payout paid → creator Paid on the campaign', (select status from campaign_creators where id = 'cc000000-0000-0000-0000-0000000000c1'), 'paid');
+select pg_temp.expect('all creators paid → nudge to complete', run_automation('campaign_status') like '%1 ready to complete', true);
+-- month-end lock
+reset role;
+update org_settings set books_locked_through = '2026-10-31';
+set role authenticated;
+select pg_temp.login(:MGR);
+select pg_temp.expect_error('closed month: a manager can’t edit', $q$update expenses set description = 'x', change_reason = 'typo' where id = (select id from expenses where expense_date <= '2026-10-31' and payout_id is null limit 1)$q$, '%books are closed%');
+select pg_temp.login(:F1);
+select pg_temp.expect_error('closed month: a founder needs a reason', $q$update expenses set description = 'x' where id = (select id from expenses where expense_date <= '2026-10-31' and payout_id is null limit 1)$q$);
+update expenses set description = 'Corrected after close', change_reason = 'CA asked for the right vendor name' where id = (select id from expenses where expense_date <= '2026-10-31' and payout_id is null order by id limit 1);
+select pg_temp.expect('…and with one it is saved and logged', (select count(*) from activity_log where table_name = 'expenses' and reason = 'CA asked for the right vendor name'), 1::bigint);
+reset role;
+update org_settings set books_locked_through = null;
 select pg_temp.expect('no schema rule violations', (select count(*) from public.schema_rule_violations()), 0::bigint);
 \o
 \echo 'WORK CHECKS PASSED'
