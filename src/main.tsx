@@ -37,6 +37,7 @@ import { ReportsPage } from './pages/ReportsPage'
 import { KaizenPage } from './pages/KaizenPage'
 import { FocusPage } from './pages/FocusPage'
 import { AiPage } from './pages/AiPage'
+import { AiSettingsPage, AutomationsPage, IntegrationsPage } from './pages/SettingsAdmin'
 import { OpeningWizard } from './pages/opening/OpeningWizard'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
@@ -67,6 +68,9 @@ function Protected() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/opening" element={<OpeningWizard />} />
+          <Route path="/settings/automations" element={<AutomationsPage />} />
+          <Route path="/settings/integrations" element={<IntegrationsPage />} />
+          <Route path="/settings/ai" element={<AiSettingsPage />} />
           <Route path="/brands" element={<BrandsPage />} />
           <Route path="/brands/new" element={<BrandForm />} />
           <Route path="/brands/:id" element={<BrandDetail />} />

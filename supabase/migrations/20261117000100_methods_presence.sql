@@ -23,7 +23,7 @@ returns boolean language sql stable as $$ select coalesce(current_setting('app.s
 --    The ping carries no data; the board re-reads through its API key.
 -- ─────────────────────────────────────────────────────────────
 create or replace function public.emit_event(p_event text, p_payload jsonb default '{}')
-returns void language plpgsql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public, extensions as $$
 declare v_url text := (select ops_webhook_url from org_settings limit 1); v_secret text;
   v_body jsonb := jsonb_build_object('event', p_event, 'sent_at', now(), 'data', p_payload);
 begin
@@ -34,7 +34,7 @@ begin
     execute $q$select decrypted_secret from vault.decrypted_secrets where name = 'ops_webhook_secret'$q$ into v_secret;
     execute 'select net.http_post(url := $1, headers := $2, body := $3)' using v_url,
       jsonb_build_object('Content-Type', 'application/json', 'X-SocialMog-Event', p_event,
-        'X-SocialMog-Signature', encode(extensions.hmac(v_body::text, coalesce(v_secret, ''), 'sha256'), 'hex')), v_body;
+        'X-SocialMog-Signature', encode(hmac(v_body::text, coalesce(v_secret, ''), 'sha256'), 'hex')), v_body;
   exception when others then raise notice 'webhook % not sent: %', p_event, sqlerrm; end;
 end $$;
 revoke execute on function public.emit_event(text, jsonb) from public, anon, authenticated;

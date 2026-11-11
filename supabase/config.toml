@@ -39,3 +39,14 @@ skip_nonce_check = false
 
 [functions.invite-member]
 verify_jwt = true
+
+# These functions are called without a user login (the database scheduler, or
+# the Ops Board with its own API key), so they check their own secret instead.
+[functions.ops]
+verify_jwt = false
+[functions.daily-digest]
+verify_jwt = false
+[functions.month-end]
+verify_jwt = false
+[functions.ai_generate]
+verify_jwt = false

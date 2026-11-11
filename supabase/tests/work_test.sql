@@ -255,6 +255,36 @@ update expenses set description = 'Corrected after close', change_reason = 'CA a
 select pg_temp.expect('…and with one it is saved and logged', (select count(*) from activity_log where table_name = 'expenses' and reason = 'CA asked for the right vendor name'), 1::bigint);
 reset role;
 update org_settings set books_locked_through = null;
+
+-- ── Ops Board API ───────────────────────────────────────────
+set role authenticated;
+select pg_temp.login(:MGR);
+select pg_temp.expect_error('manager can’t create API keys', $q$select ops_key_create('x')$q$, '%Only a founder%');
+select pg_temp.expect_error('the app can’t call the API functions directly', $q$select ops_summary('this_week')$q$);
+select pg_temp.login(:F1);
+create temp table k as select ops_key_create('Ops Board') key;
+select pg_temp.expect('key is shown once; only its hash is stored', (select count(*) from api_clients c, k where c.key_hash = encode(digest(k.key, 'sha256'), 'hex') and c.key_prefix = left(k.key, 14) and to_jsonb(c)::text not like '%' || k.key || '%'), 1::bigint);
+reset role;
+select pg_temp.expect('a good key authenticates', (select (ops_authenticate(encode(digest(key, 'sha256'), 'hex'), 'GET', '/ops/today')->>'ok')::boolean from k), true);
+select pg_temp.expect('a wrong key does not', (ops_authenticate('nope', 'GET', '/ops/today')->>'status'), '401');
+update api_clients set rate_limit_per_min = 2 where revoked_at is null;
+select ops_authenticate(encode(digest(key, 'sha256'), 'hex'), 'GET', '/ops/today') from k;
+select pg_temp.expect('rate limit: third call in a minute is refused', (select ops_authenticate(encode(digest(key, 'sha256'), 'hex'), 'GET', '/ops/today')->>'status' from k), '429');
+select pg_temp.expect('presence lists founders only', (select jsonb_array_length(ops_presence())), 2);
+select pg_temp.expect('today has tasks, shoots, deadlines, andons', (select count(*) from jsonb_object_keys(ops_today())), 5::bigint);
+select pg_temp.expect('summary: totals and per-founder work', (select (ops_summary('this_month') ?& array['revenue','profit','cash_received','expenses','content_posted','campaigns_live']) and jsonb_array_length(ops_summary('this_month')->'founders') = 2), true);
+select pg_temp.expect('summary revenue = money overview', (select (ops_summary('custom', '2026-04-01', '2027-03-31')->>'revenue')::numeric), (select revenue from money_overview('2026-04-01', '2027-03-31')));
+select pg_temp.expect_error('summary: bad range refused', $q$select ops_summary('forever')$q$);
+select pg_temp.expect('activity is plain language', (select count(*) > 0 from jsonb_array_elements(ops_activity(50)) a where a->>'text' like 'Founder One %'), true);
+select pg_temp.expect('activity never mentions payouts, capital or payment details', (select count(*) from jsonb_array_elements(ops_activity(100)) a where a->>'record_type' in ('creator_payouts','capital_entries','creator_payment_details','expenses')), 0::bigint);
+select pg_temp.expect('status write: founder by email', (select ops_set_status('founder2@example.com', 'in_shoot', 'Masala Co shoot')->>'status'), 'in_shoot');
+select pg_temp.expect('…is logged with its source', (select source from presence_log where member_id = (select f2 from ids) order by started_at desc limit 1), 'ops_board');
+select pg_temp.expect_error('status write: only founders', $q$select ops_set_status('manager@example.com', 'working')$q$);
+select pg_temp.expect_error('status write: only known statuses', $q$select ops_set_status('founder2@example.com', 'away')$q$);
+set role authenticated;
+select pg_temp.expect('rotate: new key returned', (select ops_key_rotate((select id from api_clients where revoked_at is null)) like 'smog_ops_%'), true);
+reset role;
+select pg_temp.expect('…and the old key stops working at once', (select ops_authenticate(encode(digest(key, 'sha256'), 'hex'), 'GET', '/ops/today')->>'status' from k), '401');
 select pg_temp.expect('no schema rule violations', (select count(*) from public.schema_rule_violations()), 0::bigint);
 \o
 \echo 'WORK CHECKS PASSED'

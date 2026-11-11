@@ -50,7 +50,16 @@ export function Settings() {
           <Icon name="chevronRight" className="text-muted shrink-0" />
         </Link>
       )}
-      <p className="text-xs text-muted">Company details, security, backups and API keys arrive with feature 13.</p>
+      {(role === 'founder' || role === 'manager') && [
+        ['/settings/automations', 'Automations', 'What the system does by itself: on/off, last run, results, run now. Task templates and messages to approve.'],
+        ['/settings/ai', 'AI providers', 'Provider order, models and daily usage.'],
+        ...(role === 'founder' ? [['/settings/integrations', 'Integrations — Ops Board', 'API key, allowed website, webhooks and the API document.']] : []),
+      ].map(([to, title, about]) => (
+        <Link key={to} to={to} className="shoji shoji-pad flex items-center justify-between gap-4 hover:bg-raised/60 transition-colors duration-calm">
+          <span className="min-w-0"><span className="block text-ink font-medium">{title}</span><span className="block text-sm text-muted mt-0.5">{about}</span></span>
+          <Icon name="chevronRight" className="text-muted shrink-0" />
+        </Link>))}
+      <p className="text-xs text-muted">Company details, security and backups arrive with feature 13.</p>
     </div>
   )
 }

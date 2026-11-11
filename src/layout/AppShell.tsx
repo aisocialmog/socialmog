@@ -4,6 +4,7 @@ import { DateRangePicker } from './DateRangePicker'
 import { GlobalSearch } from './GlobalSearch'
 import { Notifications } from './Notifications'
 import { UserMenu } from './UserMenu'
+import { StatusPicker } from './StatusPicker'
 import { Icon } from '../components/ui/Icon'
 import { Avatar } from '../components/ui/Avatar'
 import { useAuth } from '../lib/auth'
@@ -143,6 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="ml-auto flex items-center gap-1 sm:gap-2">
               <button className="icon-btn sm:hidden" aria-label="Search" onClick={() => setMobileSearch(true)}><Icon name="search" className="text-lg" /></button>
               <div className="hidden md:block"><DateRangePicker /></div>
+              <StatusPicker />
               <Notifications />
               <UserMenu />
             </div>

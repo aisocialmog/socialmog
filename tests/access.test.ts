@@ -6,19 +6,21 @@ const labels = (r: Role) => navFor(r).map(n => n.label)
 
 describe('pages per role', () => {
   it('founder and manager see every page', () => {
-    expect(labels('founder')).toHaveLength(11)
-    expect(labels('manager')).toHaveLength(11)
+    expect(labels('founder')).toHaveLength(13)
+    expect(labels('manager')).toHaveLength(13)
   })
   it('team members never see money, reports, brands or creators', () => {
-    expect(labels('team_member')).toEqual(['Dashboard', 'Campaigns', 'Production', 'Calendar', 'Tasks', 'AI Tools', 'Settings'])
+    expect(labels('team_member')).toEqual(['Dashboard', 'Campaigns', 'Production', 'Calendar', 'Tasks', 'Activity', 'Kaizen', 'AI Tools', 'Settings'])
     expect(canOpen('team_member', '/money')).toBe(false)
     expect(canOpen('team_member', '/money/invoices/123')).toBe(false)
     expect(canOpen('team_member', '/campaigns/abc')).toBe(true)
   })
   it('freelancers only see their own work', () => {
-    expect(labels('freelancer')).toEqual(['Dashboard', 'Production', 'Calendar', 'Tasks', 'Settings'])
+    expect(labels('freelancer')).toEqual(['Dashboard', 'Production', 'Calendar', 'Tasks', 'Activity', 'Settings'])
     expect(canOpen('freelancer', '/campaigns')).toBe(false)
     expect(canOpen('freelancer', '/brands/x')).toBe(false)
+    expect(canOpen('freelancer', '/ai')).toBe(false)
+    expect(canOpen('freelancer', '/reports')).toBe(false)
   })
 })
 

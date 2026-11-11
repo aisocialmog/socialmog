@@ -117,6 +117,14 @@ const REPORTS: Record<string, () => Row> = {
 }
 const emptyReport = (t: string) => ({ sections: [{ title: t, columns: [col('name', 'Name'), col('value', 'Value', 'number')], rows: [{ name: 'Sample row', value: 1 }] }] })
 
+const AUTOS: Row[] = [
+  ['retainer_invoices', 'Retainer invoice drafts', 'Drafts each active retainer’s invoice on its billing day.', 'Daily 6:00 am', '2 draft invoices created for a founder to review', null],
+  ['reminders', 'Reminders to us', 'Invoices due and overdue, payouts, shoots, go-lives, renewals, overdue tasks.', 'Daily 8:30 am', '5 reminders checked', null],
+  ['payout_on_approval', 'Payout on approval', 'Creates a pending payout at the agreed fee when the client approves a creator’s deliverable.', 'When a deliverable is approved', null, null],
+  ['month_end_close', 'Month-end close', 'Locks last month’s money records and emails the P&L and capital statement.', '1st of the month 7:00 am', 'Books closed through 31 Oct 2026', null],
+  ['jidoka_checks', 'Jidoka checks', 'Stops and lights the andon when margins or the balance check look wrong.', 'Daily 6:20 am', 'Stopped: 1 problem found — andon lit', null]]
+  .map(([key, name, description, schedule_label, last_result], i) => ({ id: 'au' + i, key, name, description, schedule_label, is_enabled: true, last_run_at: last_result ? hoursAgo(3 + i) : null, last_result, last_error: null, runs_by_hand: key !== 'payout_on_approval' }))
+T.automations = AUTOS
 const RPC: Record<string, (a: Row) => any> = {
   timer_start: a => { RPC.timer_stop({}); T.time_logs.push({ id: uid(), member_id: ME, task_id: a.p_task, started_at: now(), ended_at: null, duration_minutes: null, source: a.p_source ?? 'timer' }); const t = T.tasks.find(x => x.id === a.p_task); if (t?.status === 'todo') t.status = 'in_progress' },
   timer_stop: () => T.time_logs.filter(l => !l.ended_at).forEach(l => { l.ended_at = now(); l.duration_minutes = (Date.now() - Date.parse(l.started_at)) / 60000 }),
@@ -147,16 +155,12 @@ const RPC: Record<string, (a: Row) => any> = {
     { kind: 'subscription', title: 'Envato Elements', detail: '₹1,650 a month · not confirmed in use for 90+ days', link: '/money/expenses', fix: 'Still using', id: 'rx1' }],
   subscription_reviewed: () => null,
   hansei_due: () => ({ due: false, week_start: T.hansei_entries[0].week_start }),
-  automations_list: () => [
-    ['retainer_invoices', 'Retainer invoice drafts', 'Drafts each active retainer’s invoice on its billing day.', 'Daily 6:00 am', '2 drafts created'],
-    ['reminders', 'Reminders to us', 'Invoices due and overdue, payouts, shoots, go-lives, renewals, overdue tasks.', 'Daily 8:30 am', '5 reminders sent'],
-    ['month_end_close', 'Month-end close', 'Locks last month’s money records and emails the P&L and capital statement.', '1st of the month 7:00 am', 'Locked through 31 Oct 2026'],
-    ['jidoka_checks', 'Jidoka checks', 'Stops and lights the andon when margins, fees or the balance check look wrong.', 'Daily 6:30 am', 'Stopped: margin on “Winter skin launch” is 9% (below 15%)']]
-    .map(([key, n, d, s, r], i) => ({ key, name: n, description: d, schedule_label: s, is_enabled: true, last_run_at: hoursAgo(3 + i), last_result: r, last_error: i === 3 ? 'Andon raised' : null })),
+  automations_list: () => AUTOS,
   run_automation: () => 'Ran in preview — nothing changed.',
   creator_match: () => [
     { creator_id: 'cr1', name: 'Sana Kapoor (sample)', score: 86, tier: 'Micro', city: 'Mumbai', niches: ['food', 'lifestyle'], avg_views: 42000, engagement_rate: 5.2, rate: 18000, past_campaigns: 2, avg_cpv: 0.41 },
     { creator_id: 'cr2', name: 'Dev Malhotra (sample)', score: 74, tier: 'Mid', city: 'Delhi', niches: ['food'], avg_views: 120000, engagement_rate: 3.1, rate: 60000, past_campaigns: 0, avg_cpv: null }],
+  ops_key_rotate: a => { RPC.ops_key_revoke(a); return RPC.ops_key_create({ p_name: 'Ops Board' }) },
   ai_usage: () => VIEWS.ai_usage_today(),
   ops_key_create: a => { const key = 'smog_ops_' + Math.random().toString(36).slice(2, 14); T.api_clients.push({ id: uid(), name: a.p_name, key_prefix: key.slice(0, 13), created_at: now(), last_used_at: null, revoked_at: null }); return key },
   ops_key_revoke: a => { const k = T.api_clients.find(c => c.id === a.p_id); if (k) k.revoked_at = now() },

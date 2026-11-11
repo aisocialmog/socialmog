@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent } from 'react'
-import { AiRecordTools } from '../../components/work/Ai'
+import { AiRecordTools, InactiveFlag } from '../../components/work/Ai'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { moneyApi } from '../../data/money'
 import { PAY_STATUS_LABEL, PAY_STATUS_TONE } from '../../lib/money'
@@ -72,6 +72,7 @@ export function BrandDetail() {
         </div>
         <div className="flex items-center gap-1">
           <Link to={`/brands/${b.id}/edit`} className="btn-primary"><Icon name="edit" /> Edit brand</Link>
+          <InactiveFlag brandId={id} />
           <AiRecordTools kind="brand" id={id} />
           <MoreMenu items={[
             ...BRAND_STATUSES.filter(s => s !== b.status).map(s => ({ label: `Move to ${STATUS_LABEL[s]}`, onSelect: () => act(() => brandsApi.setStatus(b.id, s)) })),

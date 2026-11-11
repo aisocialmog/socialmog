@@ -46,7 +46,7 @@ brands ─┬─ brand_contacts
                       │                      │             ├─ creator_rate_cards
                       │                      │             └─ creator_payment_details (founders only)
                       └─ deliverables ───────┘  (brand required; campaign/retainer optional)
-                           ├─ scripts ─ ai_requests
+                           ├─ scripts ─ ai_logs
                            ├─ deliverable_reviews · deliverable_metrics
                            └─ shoot_deliverables ─ shoots ─ shoot_crew (team / vendor / creator)
 calendar_events            vendors (freelancers, studios, software)
@@ -58,8 +58,12 @@ money_accounts ─┬─ receipts ─ receipt_allocations ─ invoices ─ invoi
                 └─ account_transfers
 targets
 
-tasks · comments · files · notifications · automation_rules · reminders
-ai_prompt_templates · ai_requests · api_clients · api_request_log · webhook_subscriptions
+tasks ─┬─ task_assignees · task_checklist_items · time_logs · comments · files
+       └─ recurring_tasks                notifications · andons · wip_limits
+presence ─ presence_log                  kaizen_entries · hansei_entries
+automations ─ automation_runs            task_templates · message_drafts
+ai_providers · ai_logs · ai_cache · ai_insights · ai_prompt_templates
+api_clients · api_request_log · webhook_subscriptions
 backups · saved_views · activity_log
 ```
 
@@ -169,6 +173,66 @@ Founders only. A one-time wizard at **Settings → Opening balances & import** (
 
 - **Tests:** `supabase/tests/opening_test.sql`, `tests/opening.test.ts`, `tests/historyImport.test.ts`.
 
+## Tasks, time log and activity (feature 8)
+
+- **Tasks** (`/tasks`): title, description, one or more assignees, due date and time, priority, status (To do · In progress · Waiting on client · Done), one linked record, checklist, comments with @mentions, attachments. Views: My tasks, All, Board, Calendar, Overdue.
+- **Quick add:** `Call Rohan about reel edit tomorrow 4pm @Founder2 #BrandX` → title, people, date, time and brand (`src/lib/tasks.ts`, unit-tested).
+- **Recurring tasks:** daily / weekly / monthly. **Timer:** start/stop on any task → `time_logs` (one running timer per person).
+- **Activity** (`/activity`): the activity log in plain language, filtered by person, record type and the global date range; plus the daily summary per person (tasks completed, hours logged, records created / updated).
+- **Notifications:** task assigned, @mention, due today, overdue, invoice paid, deliverable approved by the client. A **daily digest email** goes out at 9:00 am IST through Resend (`supabase/functions/daily-digest`).
+
+## Dashboard and reports (feature 9)
+
+Everything is calculated in the database: `dashboard(from, to)`, `report(name, from, to)` and `records_behind(metric, …)`.
+
+- **Dashboard:** money row (founders and managers), work row, four charts, five lists and the team row. Each KPI shows ↑/↓ % against the previous equal period (a whole month compares with the month before).
+- **Reports** (`/reports`): P&L, brands, campaign performance, creators (best value first), production efficiency, cash flow, receivables ageing & payables, capital statement (founders), team productivity. Each exports CSV; **PDF** uses the browser's print dialog.
+- **Go and see:** every dashboard and report number opens the exact records behind it, and the records add up to the number (checked in the database tests).
+
+## Working methods
+
+| Method | What it does |
+|---|---|
+| **Asa** — morning brief | Founders, before noon: shoots, tasks due, payments expected, payouts due and the *ichiban*. One tap starts the day. |
+| **WIP limits** | Per column on the campaign, production and task boards; an over-limit column header turns red. |
+| **Andon** | "I'm blocked" on any task, production item or campaign: reason + who can unblock; founders are notified; the lantern glows on the dashboard; time-to-resolve is logged. |
+| **Poka-yoke** | Blocks: duplicate invoice (same brand, amount, month — unless confirmed), GST on with no rate, payout to a creator with no UPI/bank details, completing a campaign with unposted deliverables. (Over-payment and uncategorised expenses were already blocked.) |
+| **Jidoka** | Automations stop and raise an andon on a thin campaign margin (below 15%), a creator fee 3× their usual, or a money balance check that doesn't match. Thresholds live in `org_settings`. |
+| **Heijunka / muri** | Kaizen → Workload: tasks and estimated hours per person per day; warns above 45 hours or 40% more than a teammate, and suggests which tasks to move. |
+| **Muda** | Kaizen → Waste: reopened tasks, revisions over the limit, items stuck over 3 days, invoices overdue over 30 days, subscriptions not confirmed in use for 90 days — each with a fix button. |
+| **Kaizen log** | Problem · change · result · date, with a weekly streak. |
+| **Hansei** | Fridays 6 pm IST: three questions per founder, shown side by side; each "what we'll change" line becomes a task or a kaizen entry. |
+| **Shūchū** — focus | Full-screen 25 or 50 minute session on one task; logs the time and sets the status to Focus. |
+
+## AI (feature 10)
+
+One Edge Function, `ai_generate`, is the only door to AI. Provider keys are Supabase secrets.
+
+- **Providers** (Settings → AI providers), tried in priority order — Google Gemini, Groq, OpenRouter. A rate limit or error moves to the next. Identical requests are cached for 24 hours. Every call is logged in `ai_logs`; today's remaining free quota shows on the AI Tools page.
+- **Privacy filter:** phone numbers, emails, UPI IDs, bank account numbers, IFSC, PAN and GSTIN are removed before anything is sent (`supabase/functions/_shared/privacy.ts`, unit-tested).
+- **Drafts only:** every result opens in an editable box with Accept / Regenerate / Discard. Nothing is saved without Accept.
+- **Tools** (`/ai` and buttons inside records): brief to plan, script writer, captions, creator matcher, campaign report summary, notes → tasks, follow-up writer, weekly insight, Ask Social Mog.
+- **Creator matcher:** the ranking is ours (`creator_match()`: niche 30, rate fit 25, performance 25, platform 10, city 10). The AI only words the reasons.
+- **Ask Social Mog:** the AI proposes a structured query; `ask_query()` checks it against approved views and real columns, quotes every value, caps it at 100 rows and runs it read-only as the person asking (so RLS still applies). The AI never writes SQL and can never write data.
+
+## Automations (feature 11)
+
+Settings → Automations lists all 17 with an on/off switch, last run, result, errors and **Run now**. Scheduled ones run through pg_cron; the rest are triggers.
+
+- **Status:** invoice overdue notices (day 1, 7, 15); campaign → Live on first post, → Reporting after the end date, nudge to complete when every creator is paid; creator → Paid when the payout is paid; brand "Inactive?" after 60 quiet days.
+- **Records:** retainer invoice drafts on billing day; recurring expenses; a pending payout when a client approves a creator's deliverable; template tasks for each new campaign (templates are editable).
+- **Reminders to us:** invoice due in 3 days, payouts due this week, shoots and go-lives tomorrow, retainer renewal in 15 days, tasks due and overdue.
+- **Messages to brands and creators are only ever drafts** — approve and send them yourself.
+- **Month-end close** (1st, 7:00 am IST): locks last month's money records (an edit then needs a founder and a reason) and emails both founders the P&L and capital statement PDF.
+
+## Ops Board integration (feature 12)
+
+Settings → Integrations holds the API key (shown once, stored as a hash; rotate or revoke any time), the allowed website, the webhook URL and the **API document** to hand to the Ops Board project.
+
+- `GET /ops/presence · /ops/today · /ops/summary · /ops/activity` and `POST /ops/status` (the only write: a founder's own status). Rate limited per key. Money is totals only; payouts, capital and payment details never appear.
+- **Presence:** Working, Focus, In a shoot, In a meeting, On break, Off, Blocked, Away (after 30 quiet minutes). Set from the top bar, the Ops Board, focus mode or the andon button; every change is logged.
+- **Webhooks** (HMAC-signed): `status.changed`, `andon.raised`, `andon.resolved`, `invoice.paid`, `campaign.completed`. **Realtime:** a no-data ping on the public `ops-board` channel tells the board to refresh.
+
 ## Setting it up
 
 1. **Founders:** put both founder names and emails in `supabase/migrations/20261109000800_seed_founders.sql`. The push stops with an error while the placeholders are still there.
@@ -185,14 +249,21 @@ Founders only. A one-time wizard at **Settings → Opening balances & import** (
 5. **First logins:** invite both founder emails once from the dashboard (Authentication → Users → Invite user). Their logins link to the seeded rows. From then on, founders invite everyone from **Settings → Team**.
 6. **Money settings:** in the app, Money → Settings — our GST state, GSTIN (or leave blank), legal name, address, bank details, UPI ID and logo.
 7. **Opening balances:** run the wizard once (Settings → Opening balances & import) before entering day-to-day records. It sets the go-live date, opening capital, each account's opening balance and anything still unpaid, and checks they agree.
-8. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
+8. **Scheduler and email** (once, in the Supabase dashboard):
+   - Database → Extensions: enable **pg_cron** and **pg_net**, then run the last block of `20261120000100_automations.sql` again (it registers the jobs).
+   - Vault: add secrets `project_url` (`https://<ref>.supabase.co`) and `cron_secret` (any long random string); for webhooks also `ops_webhook_secret`.
+   - `supabase secrets set CRON_SECRET=<the same string> RESEND_API_KEY=<key> EMAIL_FROM="Social Mog OS <os@yourdomain>"`
+   - `supabase secrets set GEMINI_API_KEY=… GROQ_API_KEY=… OPENROUTER_API_KEY=…` (any you have; missing ones are skipped)
+   - `supabase functions deploy daily-digest month-end ai_generate ops`
+9. **Ops Board:** Settings → Integrations — create the key, set the Ops Board's website and webhook URL.
+10. **Frontend:** `cp .env.example .env.local`, then add the project URL and anon key.
 
 ```bash
 npm install
 npm run dev                  # http://localhost:5173
 npm test                     # ₹ format, IST dates, FY periods, CSV, role → page map, tab bar
 npm run check:contrast       # WCAG AA check of every colour pair
-npm run test:db              # migrations + role/RLS, brands, creators, campaigns, production and money checks
+npm run test:db              # migrations + role/RLS and every module's database checks (8 suites)
 ```
 
 Without Supabase settings, `npm run dev` shows a local-only design preview on the login page, so you can look around as each role. That preview is never included in a production build.

@@ -123,3 +123,10 @@ export function ReportSummary({ campaignId, className = '' }: { campaignId: stri
   useEffect(() => { first('campaigns', 'id', campaignId).then(c => setText((c.report_summary as string) ?? null)) }, [campaignId])
   return text ? <p className={className}>{text}</p> : null
 }
+
+/** "Inactive?" — set by the automation when a brand has had no work or invoice for 60 days. */
+export function InactiveFlag({ brandId }: { brandId: string }) {
+  const [since, setSince] = useState<string | null>(null)
+  useEffect(() => { first('brands', 'id', brandId).then(b => setSince((b.maybe_inactive_since as string) ?? null)) }, [brandId])
+  return since ? <span className="pill bg-yamabuki text-sumi" title={`No campaign, production or invoice since before ${formatDate(since)}`}>Inactive?</span> : null
+}
