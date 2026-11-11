@@ -81,7 +81,7 @@ export function describeActivity(e: ActivityEntry, names: Record<string, string>
   const noun = NOUN[e.table_name] ?? e.table_name.replace(/_/g, ' ')
   const t = titleOf(e, names)
   const thing = SELF.has(e.table_name) ? noun : `${noun}${t ? ` “${t}”` : ''}`
-  const special = describeCreatorBits(e, names) ?? describeCampaignBits(e, names) ?? describeMoneyBits(e)
+  const special = describeTaskBits(e) ?? describeCreatorBits(e, names) ?? describeCampaignBits(e, names) ?? describeMoneyBits(e)
   if (special) return special
 
   switch (e.action) {
@@ -257,6 +257,33 @@ function describeMoneyBits(e: ActivityEntry): { text: string; kind: ActivityKind
       if (e.action === 'create') return { text: 'opened the account', kind: 'create' }
       if (e.action === 'archive') return { text: 'archived the account', kind: 'archive' }
       return fields.length ? { text: `changed ${changes()}`, kind: fields.some(f => MONEY.has(f)) ? 'money' : 'update' } : { text: '', kind: 'update' }
+  }
+  return null
+}
+
+/** Tasks, their checklists and comments. */
+const TASK_WORD: Record<string, string> = { todo: 'To do', in_progress: 'In progress', waiting_client: 'Waiting on client', done: 'Done', low: 'Low', normal: 'Medium', high: 'High', urgent: 'Urgent' }
+function describeTaskBits(e: ActivityEntry): { text: string; kind: ActivityKind } | null {
+  const nv = e.new_values ?? {}, ov = e.old_values ?? {}
+  switch (e.table_name) {
+    case 'tasks': {
+      if (e.action === 'create') return { text: 'created the task', kind: 'create' }
+      if (e.action === 'archive') return { text: 'archived the task', kind: 'archive' }
+      if (e.changed_fields.includes('status')) return nv.status === 'done' ? { text: 'completed the task', kind: 'status' }
+        : { text: `moved the task from ${TASK_WORD[String(ov.status)] ?? ov.status} to ${TASK_WORD[String(nv.status)] ?? nv.status}`, kind: 'status' }
+      const f = e.changed_fields.filter(x => !QUIET.has(x) && x !== 'completed_at')
+      if (!f.length) return { text: '', kind: 'update' }
+      if (f.length === 1 && f[0] === 'priority') return { text: `changed priority from ${TASK_WORD[String(ov.priority)]} to ${TASK_WORD[String(nv.priority)]}`, kind: 'update' }
+      if (f.length === 1 && f[0] === 'due_date') return { text: `moved the due date from ${show('due_date', ov.due_date)} to ${show('due_date', nv.due_date)}`, kind: 'update' }
+      if (f.length === 1 && f[0] === 'assignee_id') return { text: 'changed who the task is assigned to', kind: 'update' }
+      return { text: `updated ${f.map(x => x.replace(/_id$/, '').replace(/_/g, ' ')).join(', ')}`, kind: 'update' }
+    }
+    case 'task_checklist_items':
+      if (e.action === 'create') return { text: `added checklist item “${nv.title}”`, kind: 'create' }
+      if (e.action === 'archive') return { text: 'removed a checklist item', kind: 'archive' }
+      return e.changed_fields.includes('is_done') ? { text: nv.is_done ? 'ticked a checklist item' : 'unticked a checklist item', kind: 'update' } : { text: '', kind: 'update' }
+    case 'task_assignees': return e.action === 'create' ? { text: 'added someone to the task', kind: 'update' } : { text: 'removed someone from the task', kind: 'update' }
+    case 'comments': return e.action === 'create' ? { text: `commented: “${String(nv.body ?? '').slice(0, 80)}”`, kind: 'update' } : { text: '', kind: 'update' }
   }
   return null
 }

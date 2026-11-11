@@ -8,10 +8,12 @@ import { FormError } from '../../pages/auth/AuthLayout'
 export interface KanbanColumn<K extends string> { key: K; label: string; kanji?: string }
 interface Drag<K> { id: string; from: K; x: number; y: number; dx: number; dy: number; w: number; active: boolean; over: K | null; sx: number; sy: number }
 
-export function Kanban<T, K extends string>({ columns, items, getId, getColumn, getName, renderCard, onMove, onOpen, columnMeta, hint }: {
+export function Kanban<T, K extends string>({ columns, items, getId, getColumn, getName, renderCard, onMove, onOpen, columnMeta, hint, limits }: {
   columns: KanbanColumn<K>[]; items: T[]; getId: (t: T) => string; getColumn: (t: T) => K; getName: (t: T) => string
   renderCard: (t: T, grip: ReactNode) => ReactNode; onMove: (t: T, to: K) => Promise<void>; onOpen: (t: T) => void
   columnMeta?: (key: K, items: T[]) => ReactNode; hint?: string
+  /** WIP limits: a column over its limit turns akane red. */
+  limits?: Partial<Record<K, number>>
 }) {
   const board = useRef<HTMLDivElement>(null)
   const [drag, setDrag] = useState<Drag<K> | null>(null)
@@ -84,14 +86,15 @@ export function Kanban<T, K extends string>({ columns, items, getId, getColumn, 
       <div ref={board} className={`flex gap-3 sm:gap-4 overflow-x-auto pb-3 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory lg:snap-none ${drag?.active ? 'select-none' : ''}`}>
         {columns.map(col => {
           const list = items.filter(t => getColumn(t) === col.key)
+          const max = limits?.[col.key], overWip = max != null && list.length > max
           const isOver = drag?.active && drag.over === col.key && drag.from !== col.key
           return (
             <section key={col.key} data-column={col.key} aria-label={`${col.label}, ${list.length}`}
               className={`snap-start shrink-0 w-[82vw] sm:w-72 ${columns.length <= 5 ? 'lg:w-auto lg:flex-1 lg:min-w-[12.5rem]' : 'lg:w-64'} rounded-shoji border transition-colors duration-calm flex flex-col
                 ${isOver ? 'border-accent bg-raised/70' : 'border-line/20 bg-card/50'}`}>
-              <header className="px-4 pt-4 pb-3 flex items-baseline justify-between gap-2">
+              <header className={`px-4 pt-4 pb-3 flex items-baseline justify-between gap-2 rounded-t-shoji ${overWip ? 'bg-akane text-kinari [&_*]:!text-kinari' : ''}`} data-over-wip={overWip || undefined}>
                 <h2 className="font-mincho text-ink flex items-baseline gap-2">{col.kanji && <span className="text-accent-ink text-sm" aria-hidden lang="ja">{col.kanji}</span>}{col.label}</h2>
-                <span className="text-xs text-muted num">{columnMeta ? columnMeta(col.key, list) : list.length}</span>
+                <span className="text-xs text-muted num">{columnMeta ? columnMeta(col.key, list) : list.length}{max != null && <> / {max}{overWip && <span className="sr-only"> — over the limit</span>}</>}</span>
               </header>
               <ul className="px-2.5 pb-2.5 space-y-2.5 min-h-[7rem] flex-1">
                 {list.map(t => (

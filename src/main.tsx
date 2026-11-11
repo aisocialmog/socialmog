@@ -30,6 +30,9 @@ import { ExpenseDetail, ExpensesPage } from './pages/money/Expenses'
 import { PayoutDetail, PayoutsDue, PayoutsPage } from './pages/money/Payouts'
 import { AccountDetail, AccountsPage, CapitalDetail, CapitalPage } from './pages/money/CapitalAccounts'
 import { MoneyReports, MoneySettings } from './pages/money/ReportsSettings'
+import { TasksPage } from './pages/tasks/TasksPage'
+import { TaskDetail } from './pages/tasks/TaskDetail'
+import { ActivityPage } from './pages/ActivityPage'
 import { OpeningWizard } from './pages/opening/OpeningWizard'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
@@ -81,6 +84,9 @@ function Protected() {
           <Route path="/production/new" element={<ProductionForm />} />
           <Route path="/production/:id" element={<ProductionItem />} />
           <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/tasks" element={<TasksPage />} />
+          <Route path="/tasks/:id" element={<TaskDetail />} />
+          <Route path="/activity" element={<ActivityPage />} />
           <Route path="/money" element={<MoneyOverview />} />
           <Route path="/money/invoices" element={<InvoicesPage />} />
           <Route path="/money/invoices/new" element={<InvoiceEditor />} />
@@ -99,7 +105,7 @@ function Protected() {
           <Route path="/money/accounts/:id" element={<AccountDetail />} />
           <Route path="/money/reports" element={<MoneyReports />} />
           <Route path="/money/settings" element={<MoneySettings />} />
-          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar', '/money'].includes(n.to)).map(n => (
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar', '/money', '/tasks', '/activity'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />

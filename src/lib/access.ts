@@ -25,8 +25,10 @@ export const NAV: NavItem[] = [
   { to: '/production', label: 'Production', kanji: '作', roles: ALL, feature: 5 },
   { to: '/calendar', label: 'Calendar', kanji: '暦', roles: ALL, feature: 5 },
   { to: '/tasks', label: 'Tasks', kanji: '務', roles: ALL, feature: 8 },
+  { to: '/activity', label: 'Activity', kanji: '録', roles: ALL, feature: 8 },
   { to: '/money', label: 'Money', kanji: '金', roles: STAFF, feature: 6 },
   { to: '/reports', label: 'Reports', kanji: '報', roles: STAFF, feature: 9 },
+  { to: '/kaizen', label: 'Kaizen', kanji: '改', roles: ['founder', 'manager', 'team_member'], feature: 9 },
   { to: '/ai', label: 'AI Tools', kanji: '智', roles: ['founder', 'manager', 'team_member'], feature: 10 },
   { to: '/settings', label: 'Settings', kanji: '設', roles: ALL, feature: 13 },
 ]

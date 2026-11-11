@@ -9,7 +9,7 @@ import { formatDateTime } from '../lib/format'
 
 interface Note { id: string; title: string; body: string | null; kind: string; table_name: string | null; record_id: string | null; read_at: string | null; created_at: string }
 
-const PATH: Record<string, string> = { brands: '/brands', creators: '/creators', campaigns: '/campaigns', deliverables: '/production', tasks: '/tasks', invoices: '/money/invoices' }
+const PATH: Record<string, string> = { brands: '/brands', creators: '/creators', campaigns: '/campaigns', deliverables: '/production', tasks: '/tasks', invoices: '/money/invoices', creator_payouts: '/money/payouts', shoots: '/calendar' }
 
 export function Notifications() {
   const { member } = useAuth()
@@ -26,7 +26,7 @@ export function Notifications() {
     const { data } = await supabase.from('notifications')
       .select('id, title, body, kind, table_name, record_id, read_at, created_at')
       .eq('recipient_id', member.id).eq('is_archived', false)
-      .order('created_at', { ascending: false }).limit(20)
+      .order('created_at', { ascending: false }).limit(30)
     setItems((data as Note[]) ?? [])
     setUnread((data as Note[] | null)?.filter(n => !n.read_at).length ?? 0)
   }, [member])
