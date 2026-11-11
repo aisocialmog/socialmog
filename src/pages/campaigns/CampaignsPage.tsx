@@ -11,6 +11,7 @@ import { downloadCSV } from '../../lib/csv'
 import { Icon } from '../../components/ui/Icon'
 import { EmptyState, MoreMenu, Pill } from '../../components/ui/kit'
 import { Kanban } from '../../components/ui/Kanban'
+import { useWipLimits } from '../../components/work/WorkBits'
 import { Andon, EnsoSpinner } from '../../components/art/Ink'
 import { BrandLogo } from '../../components/brands/BrandBits'
 import { FormError } from '../auth/AuthLayout'
@@ -21,6 +22,7 @@ const dates = (c: CampaignSummary) => c.start_date ? `${formatDate(c.start_date)
 
 export function CampaignsPage() {
   const nav = useNavigate()
+  const wip = useWipLimits('campaigns', CAMPAIGN_STATUSES.map(s => ({ key: s, label: CAMPAIGN_STATUS_LABEL[s] })))
   const { role } = useAuth()
   const money = isStaff(role)
   const [params, setParams] = useSearchParams()
@@ -110,7 +112,7 @@ export function CampaignsPage() {
       : (data ?? []).length === 0 ? <div className="shoji"><EmptyState sketch="fuji" line={archived ? 'Nothing archived.' : 'A clear horizon. Start your first campaign.'}
           action={money && !archived && <button className="btn-primary" onClick={() => nav('/campaigns/new')}><Icon name="plus" /> New campaign</button>} /></div>
       : view === 'board' ? (
-        <Kanban columns={CAMPAIGN_STATUSES.map(s => ({ key: s, label: CAMPAIGN_STATUS_LABEL[s], kanji: CAMPAIGN_STATUS_KANJI[s] }))}
+        <Kanban limits={wip.limits} toolbar={wip.button} columns={CAMPAIGN_STATUSES.map(s => ({ key: s, label: CAMPAIGN_STATUS_LABEL[s], kanji: CAMPAIGN_STATUS_KANJI[s] }))}
           items={rows} getId={c => c.campaign_id} getColumn={c => c.status} getName={c => c.name}
           onOpen={c => nav(`/campaigns/${c.campaign_id}`)} hint="Drag a campaign to change its status — on a phone, drag by the grip."
           onMove={async (c, to) => {

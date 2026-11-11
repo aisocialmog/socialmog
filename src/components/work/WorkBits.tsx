@@ -119,10 +119,10 @@ export function useWipLimits<K extends string>(board: string, columns: { key: K;
 }
 
 // ─── Go and see: the records behind a number ────────────────
-export interface Behind { metric: string; title: string; id?: string | null; from?: string; to?: string }
+export interface Behind { metric: string; title: string; id?: string | null; key?: string; from?: string; to?: string }
 interface BehindRow { label: string; sub: string | null; on_date: string | null; amount: number | null; link: string | null }
 export function GoSee({ what, range, onClose }: { what: Behind; range: { from: string; to: string }; onClose: () => void }) {
-  const { data, loading, error } = useAsync(() => db.rpc<BehindRow[]>('records_behind', { p_metric: what.metric, p_from: what.from ?? range.from, p_to: what.to ?? range.to, p_id: what.id ?? null }), [what.metric, what.id])
+  const { data, loading, error } = useAsync(() => db.rpc<BehindRow[]>('records_behind', { p_metric: what.metric, p_from: what.from ?? range.from, p_to: what.to ?? range.to, p_id: what.id ?? null, p_key: what.key ?? null }), [what.metric, what.id, what.key])
   const rows = data ?? []
   const total = rows.reduce((s, r) => s + (r.amount ?? 0), 0), hasAmount = rows.some(r => r.amount != null)
   return (

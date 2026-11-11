@@ -11,6 +11,7 @@ import { downloadCSV } from '../../lib/csv'
 import { Icon } from '../../components/ui/Icon'
 import { EmptyState, Pill } from '../../components/ui/kit'
 import { Kanban } from '../../components/ui/Kanban'
+import { useWipLimits } from '../../components/work/WorkBits'
 import { EnsoSpinner } from '../../components/art/Ink'
 import { BrandChip, Flags } from './ProductionBits'
 import { FormError } from '../auth/AuthLayout'
@@ -42,6 +43,7 @@ function Header({ title }: { title: string }) {
 
 export function ProductionBoard() {
   const nav = useNavigate()
+  const wip = useWipLimits('production', STAGES.map(s => ({ key: s, label: STAGE_LABEL[s] })))
   const { role } = useAuth()
   const { data, loading, error, setData, reload } = useAsync(() => productionApi.items(), [])
   const [brand, setBrand] = useState('all'), [person, setPerson] = useState('all'), [format, setFormat] = useState('all'), [due, setDue] = useState('all')
@@ -84,7 +86,7 @@ export function ProductionBoard() {
       {error && <FormError>{error}</FormError>}
       {loading && !data ? <div className="py-16 grid place-items-center"><EnsoSpinner size={44} /></div>
         : !(data ?? []).length ? <div className="shoji"><EmptyState sketch="branch" line="The studio is quiet. Add your first production item." /></div> : (
-        <Kanban columns={STAGES.map(s => ({ key: s, label: STAGE_LABEL[s], kanji: STAGE_KANJI[s] }))} items={rows}
+        <Kanban limits={wip.limits} toolbar={wip.button} columns={STAGES.map(s => ({ key: s, label: STAGE_LABEL[s], kanji: STAGE_KANJI[s] }))} items={rows}
           getId={i => i.id} getColumn={i => i.stage} getName={i => i.title} onOpen={i => nav(`/production/${i.id}`)}
           hint="Drag to the next stage — on a phone, use the grip. Every move is timed in the activity log."
           onMove={async (i, to) => {

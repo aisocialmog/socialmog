@@ -188,7 +188,7 @@ function Table({ tasks, members, name }: { tasks: Task[]; members: Member[]; nam
 function Calendar({ tasks }: { tasks: Task[] }) {
   const today = istToday()
   const [ym, setYm] = useState(() => ({ y: Number(today.slice(0, 4)), m: Number(today.slice(5, 7)) - 1 }))
-  const days = monthGrid(ym.y, ym.m)
+  const days = monthGrid(ym.y, ym.m + 1)
   const move = (n: number) => setYm(({ y, m }) => { const d = new Date(Date.UTC(y, m + n, 1)); return { y: d.getUTCFullYear(), m: d.getUTCMonth() } })
   const prefix = `${ym.y}-${String(ym.m + 1).padStart(2, '0')}`
   return (
@@ -234,7 +234,6 @@ export function TasksPage() {
     <div className="space-y-5 sm:space-y-6">
       <div className="flex flex-wrap items-end gap-3">
         <h1 className="font-mincho text-3xl text-ink flex-1"><span className="text-accent-ink mr-2" aria-hidden lang="ja">務</span>Tasks</h1>
-        {view === 'board' && wip.button}
         {staff && <button className="btn-ghost" onClick={() => setRecurring(true)}>Recurring</button>}
         <Link to="/kaizen?tab=load" className="btn-ghost">Workload</Link>
         <button className="btn-primary" onClick={() => setEditing(true)}><Icon name="plus" /> New task</button>
@@ -255,7 +254,7 @@ export function TasksPage() {
         : view === 'overdue' ? (overdue.length ? <Table tasks={overdue} members={members ?? []} name="overdue-tasks" /> : <div className="shoji"><EmptyState sketch="fuji" line="A clear horizon. Nothing is overdue." /></div>)
         : view === 'calendar' ? <Calendar tasks={all} />
         : <Kanban columns={TASK_STATUSES.map(s => ({ key: s, label: TASK_STATUS_LABEL[s], kanji: TASK_STATUS_KANJI[s] }))} items={all.filter(t => t.status !== 'done' || (t.completed_at ?? '') > addDaysISO(istToday(), -7))}
-            getId={t => t.id} getColumn={t => t.status} getName={t => t.title} limits={wip.limits} hint="Done shows the last 7 days."
+            getId={t => t.id} getColumn={t => t.status} getName={t => t.title} limits={wip.limits} toolbar={wip.button} hint="Done shows the last 7 days."
             onMove={async (t, to) => { await workApi.update(t.id, { status: to }); await reload() }} onOpen={t => nav(`/tasks/${t.id}`)}
             renderCard={(t, grip) => <>
               <div className="flex items-start gap-2 pr-6">{grip}<p className="text-sm text-ink">{t.title}</p></div>

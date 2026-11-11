@@ -186,7 +186,12 @@ export const moneyApi = {
   },
   async sendInvoice(id: string, issueDate: string | null) {
     if (!supabase) return pv.sendInvoice(id, issueDate)
-    must(await supabase.from('invoices').update({ status: 'sent', ...(issueDate ? { issue_date: issueDate } : {}) }).eq('id', id))
+    const patch = { status: 'sent', ...(issueDate ? { issue_date: issueDate } : {}) }
+    const { error } = await supabase.from('invoices').update(patch).eq('id', id)
+    if (!error) return
+    // poka-yoke: a possible duplicate is stopped unless a person confirms it is intended
+    if (!error.message.includes('possible duplicate') || !window.confirm(`${error.message.replace('Poka-yoke: ', '')}\n\nSend this one as well?`)) throw new Error(error.message)
+    must(await supabase.from('invoices').update({ ...patch, duplicate_ok: true }).eq('id', id))
   },
   async cancelInvoice(id: string, reason: string) {
     if (!supabase) return pv.cancelInvoice(id, reason)

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { AndonButton } from '../../components/work/WorkBits'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { productionApi, type ItemInput, type ProductionItem as Item, type ScriptVersion, type Shoot } from '../../data/production'
 import { brandsApi } from '../../data/brands'
@@ -59,6 +60,7 @@ export function ProductionItem() {
           <select id="stage" className="field h-10 w-48" value={i.stage} onChange={e => save({ stage: e.target.value as Stage })}>
             {[...STAGES, 'cancelled' as Stage].map(s => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
           </select>
+          <AndonButton table="deliverables" id={i.id} />
           {stageIdx >= 0 && stageIdx < STAGES.length - 1 && <button className="btn-primary" onClick={() => save({ stage: STAGES[stageIdx + 1] })}>Move to {STAGE_LABEL[STAGES[stageIdx + 1]]}</button>}
         </div>
       </header>

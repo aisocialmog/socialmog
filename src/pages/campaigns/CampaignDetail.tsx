@@ -10,6 +10,7 @@ import { describeActivity, type ActivityKind } from '../../lib/activity'
 import { formatDate, formatDateTime, formatINR, istToday } from '../../lib/format'
 import { downloadCSV } from '../../lib/csv'
 import { Card, EmptyState, MoreMenu, Pill, SectionTitle } from '../../components/ui/kit'
+import { AndonButton } from '../../components/work/WorkBits'
 import { Icon } from '../../components/ui/Icon'
 import { Andon, BrushDivider, EnsoRing, EnsoSpinner, Hanko } from '../../components/art/Ink'
 import { BrandLogo } from '../../components/brands/BrandBits'
@@ -69,6 +70,7 @@ export function CampaignDetail() {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {!s.is_historical && <AndonButton table="campaigns" id={s.campaign_id} />}
           <Link to={`/campaigns/${s.campaign_id}/report`} className="btn-primary"><Icon name="download" /> Report</Link>
           {staff && <MoreMenu items={[
             { label: 'Edit campaign & budget', onSelect: () => nav(`/campaigns/${s.campaign_id}/edit`) },
