@@ -36,6 +36,7 @@ import { ActivityPage } from './pages/ActivityPage'
 import { ReportsPage } from './pages/ReportsPage'
 import { KaizenPage } from './pages/KaizenPage'
 import { FocusPage } from './pages/FocusPage'
+import { AiPage } from './pages/AiPage'
 import { OpeningWizard } from './pages/opening/OpeningWizard'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
 import { Login } from './pages/auth/Login'
@@ -92,6 +93,7 @@ function Protected() {
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/kaizen" element={<KaizenPage />} />
+          <Route path="/ai" element={<AiPage />} />
           <Route path="/focus/:id" element={<FocusPage />} />
           <Route path="/money" element={<MoneyOverview />} />
           <Route path="/money/invoices" element={<InvoicesPage />} />
@@ -111,7 +113,7 @@ function Protected() {
           <Route path="/money/accounts/:id" element={<AccountDetail />} />
           <Route path="/money/reports" element={<MoneyReports />} />
           <Route path="/money/settings" element={<MoneySettings />} />
-          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar', '/money', '/tasks', '/activity', '/reports', '/kaizen'].includes(n.to)).map(n => (
+          {NAV.filter(n => !['/', '/settings', '/brands', '/creators', '/campaigns', '/production', '/calendar', '/money', '/tasks', '/activity', '/reports', '/kaizen', '/ai'].includes(n.to)).map(n => (
             <Route key={n.to} path={`${n.to}/*`} element={<Placeholder title={n.label} kanji={n.kanji} feature={n.feature} />} />
           ))}
           <Route path="*" element={<div className="shoji"><EmptyState line="A path through the mist that leads nowhere." /></div>} />

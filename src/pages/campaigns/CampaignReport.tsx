@@ -2,6 +2,7 @@
 // the client report on washi paper. "Download PDF report" prints only the
 // paper (A4), so internal numbers never reach the brand.
 import { useEffect } from 'react'
+import { ReportSummary } from '../../components/work/Ai'
 import { Link, useParams } from 'react-router-dom'
 import { campaignsApi, type DeliverableRow } from '../../data/campaigns'
 import { useAsync } from '../../hooks/useAsync'
@@ -115,6 +116,7 @@ export function CampaignReport() {
             s.start_date && `${formatDate(s.start_date)}${s.end_date ? ` – ${formatDate(s.end_date)}` : ''}`].filter(Boolean).join(' · ')}</p>
           <div className="h-[3px] w-24 mt-4 rounded-full print-color" style={{ backgroundImage: 'linear-gradient(90deg,#B7282E,#E3793A 55%,#F2A93B)' }} aria-hidden />
         </section>
+        <ReportSummary campaignId={id} className={`text-sm leading-relaxed ${ink}`} />
 
         <section aria-label="Results" className="grid grid-cols-3 gap-px bg-[#8F877F]/30 rounded-[6px] overflow-hidden break-inside-avoid">
           {kpis.map(([k, v], i) => (

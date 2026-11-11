@@ -180,6 +180,26 @@ select pg_temp.expect_error('team member: no reports', $q$select report('pnl', '
 select pg_temp.expect('team member: no revenue records behind', (select count(*) from records_behind('revenue', '2026-04-01', '2027-03-31')), 0::bigint);
 select pg_temp.expect('team member: record_label hides what they can’t see', record_label('expenses', (select id from expenses limit 1)), null::text);
 reset role;
+
+-- ── AI ──────────────────────────────────────────────────────
+set role authenticated;
+select pg_temp.login(:F1);
+select pg_temp.expect('three providers, in priority order', (select string_agg(provider, '>' order by priority) from ai_usage()), 'Google Gemini>Groq>OpenRouter');
+select pg_temp.expect_error('the app can’t write the AI log', $q$insert into ai_logs (task, provider, model) values ('x', 'x', 'x')$q$);
+select pg_temp.expect_error('provider keys are never stored: secret name only', $q$update ai_providers set secret_name = 'sk-live-abc123' where priority = 1$q$);
+select pg_temp.expect('creator matcher ranks without touching the AI', (select count(*) > 0 and bool_and(score between 0 and 100) from creator_match((select id from campaigns where not is_historical order by created_at limit 1))), true);
+select pg_temp.expect('ask: grouped sum on an approved view', jsonb_typeof(ask_query('{"view":"invoice_totals","select":[{"column":"brand_name"},{"column":"total","agg":"sum"}],"filters":[{"column":"document_status","op":"=","value":"sent"}],"group_by":["brand_name"],"order_by":{"column":"sum_total","dir":"desc"},"limit":5}')), 'array');
+select pg_temp.expect_error('ask: tables are off limits', $q$select ask_query('{"view":"capital_entries","select":[{"column":"amount"}]}')$q$, '%isn’t available%');
+select pg_temp.expect_error('ask: unknown columns refused', $q$select ask_query('{"view":"invoice_totals","select":[{"column":"total; drop table tasks"}]}')$q$, '%Unknown column%');
+select pg_temp.expect_error('ask: only safe comparisons', $q$select ask_query('{"view":"invoice_totals","select":[{"column":"total"}],"filters":[{"column":"total","op":"> 0; delete from tasks; --","value":"1"}]}')$q$, '%Unsupported comparison%');
+select pg_temp.expect('ask: injected values stay quoted', ask_query('{"view":"invoice_totals","select":[{"column":"brand_name"}],"filters":[{"column":"brand_name","op":"=","value":"x'' or 1=1 --"}]}'), '[]'::jsonb);
+select pg_temp.expect('ask: at most 100 rows', (select jsonb_array_length(ask_query('{"view":"task_list","select":[{"column":"title"}],"limit":100000}')) <= 100), true);
+select pg_temp.expect('weekly numbers come from the database', (select weekly_numbers() ? 'this_week'), true);
+select pg_temp.login(:TEAM);
+select pg_temp.expect('ask runs as the asker: team member sees no invoices', ask_query('{"view":"invoice_totals","select":[{"column":"total"}]}'), '[]'::jsonb);
+select pg_temp.expect('matcher is staff only', (select count(*) from creator_match((select pg_temp.asowner('select id from campaigns limit 1'))::uuid)), 0::bigint);
+select pg_temp.expect_error('team member: no weekly numbers', $q$select weekly_numbers()$q$);
+reset role;
 select pg_temp.expect('no schema rule violations', (select count(*) from public.schema_rule_violations()), 0::bigint);
 \o
 \echo 'WORK CHECKS PASSED'

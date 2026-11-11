@@ -2,6 +2,7 @@
 // with the printable invoice (logo, GSTIN, bank details, UPI QR) — "Download
 // PDF" prints only the paper.
 import { Fragment, useEffect, useMemo, useState } from 'react'
+import { AiRecordTools } from '../../components/work/Ai'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { moneyApi, type BrandBilling, type InvoiceDetail, type InvoiceInput, type InvoiceItem, type OrgSettings } from '../../data/money'
@@ -214,6 +215,7 @@ export function InvoiceDetailPage() {
           {t.document_status === 'draft' && <button className="btn-primary" onClick={() => setModal('send')}>Mark as sent</button>}
           {t.document_status === 'sent' && t.outstanding > 0 && <button className="btn-primary" onClick={() => nav(`/money/payments?record=1&brand=${t.brand_id}&invoice=${id}`)}>Record payment</button>}
           <button className="btn-ghost" onClick={() => window.print()}><Icon name="download" /> PDF</button>
+          <AiRecordTools kind="invoice" id={id} />
           <MoreMenu items={menu} />
         </>} />
       <div className="no-print"><MoneyTabs /></div>

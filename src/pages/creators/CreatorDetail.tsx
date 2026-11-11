@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { AiRecordTools } from '../../components/work/Ai'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { creatorsApi, type CreatorOverview, type PaymentDetails, type PlatformRow } from '../../data/creators'
 import { useAsync } from '../../hooks/useAsync'
@@ -66,6 +67,7 @@ export function CreatorDetail() {
         </div>
         <div className="flex items-center gap-1">
           <Link to={`/creators/${c.id}/edit`} className="btn-primary"><Icon name="edit" /> Edit creator</Link>
+          <AiRecordTools kind="creator" id={id} />
           <MoreMenu items={[
             { label: 'Add to shortlist', onSelect: () => setShortlisting(true) },
             c.is_archived ? { label: 'Restore creator', onSelect: () => act(() => creatorsApi.setArchived(c.id, false)) }

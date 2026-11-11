@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { AiRecordTools } from '../../components/work/Ai'
 import { AndonButton } from '../../components/work/WorkBits'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { productionApi, type ItemInput, type ProductionItem as Item, type ScriptVersion, type Shoot } from '../../data/production'
@@ -61,6 +62,7 @@ export function ProductionItem() {
             {[...STAGES, 'cancelled' as Stage].map(s => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
           </select>
           <AndonButton table="deliverables" id={i.id} />
+          <AiRecordTools kind="production" id={i.id} />
           {stageIdx >= 0 && stageIdx < STAGES.length - 1 && <button className="btn-primary" onClick={() => save({ stage: STAGES[stageIdx + 1] })}>Move to {STAGE_LABEL[STAGES[stageIdx + 1]]}</button>}
         </div>
       </header>

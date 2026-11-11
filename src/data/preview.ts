@@ -157,6 +157,7 @@ const RPC: Record<string, (a: Row) => any> = {
   creator_match: () => [
     { creator_id: 'cr1', name: 'Sana Kapoor (sample)', score: 86, tier: 'Micro', city: 'Mumbai', niches: ['food', 'lifestyle'], avg_views: 42000, engagement_rate: 5.2, rate: 18000, past_campaigns: 2, avg_cpv: 0.41 },
     { creator_id: 'cr2', name: 'Dev Malhotra (sample)', score: 74, tier: 'Mid', city: 'Delhi', niches: ['food'], avg_views: 120000, engagement_rate: 3.1, rate: 60000, past_campaigns: 0, avg_cpv: null }],
+  ai_usage: () => VIEWS.ai_usage_today(),
   ops_key_create: a => { const key = 'smog_ops_' + Math.random().toString(36).slice(2, 14); T.api_clients.push({ id: uid(), name: a.p_name, key_prefix: key.slice(0, 13), created_at: now(), last_used_at: null, revoked_at: null }); return key },
   ops_key_revoke: a => { const k = T.api_clients.find(c => c.id === a.p_id); if (k) k.revoked_at = now() },
   set_presence: a => { const p = T.presence.find(x => x.member_id === ME)!; Object.assign(p, { status: a.p_status, message: a.p_message ?? null, since: now(), expected_back: a.p_expected_back ?? null }) },

@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { AiRecordTools } from '../../components/work/Ai'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { campaignsApi, type CampaignRecord, type CampaignSummary } from '../../data/campaigns'
 import { useAsync } from '../../hooks/useAsync'
@@ -71,6 +72,8 @@ export function CampaignDetail() {
         </div>
         <div className="flex items-center gap-1">
           {!s.is_historical && <AndonButton table="campaigns" id={s.campaign_id} />}
+          {!s.is_historical && staff && <Link to={`/ai?tool=match&campaign=${s.campaign_id}`} className="btn-ghost"><span className="font-mincho text-accent-ink" lang="ja" aria-hidden>智</span> Match creators</Link>}
+          {!s.is_historical && <AiRecordTools kind="campaign" id={s.campaign_id} />}
           <Link to={`/campaigns/${s.campaign_id}/report`} className="btn-primary"><Icon name="download" /> Report</Link>
           {staff && <MoreMenu items={[
             { label: 'Edit campaign & budget', onSelect: () => nav(`/campaigns/${s.campaign_id}/edit`) },
