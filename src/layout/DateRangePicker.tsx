@@ -3,7 +3,7 @@ import { PERIOD_LABELS, formatRange, fyLabel, istToday, type PeriodKey } from '.
 import { usePrefs } from '../lib/prefs'
 import { Icon } from '../components/ui/Icon'
 
-const PRESETS: PeriodKey[] = ['this_week', 'last_week', 'this_month', 'last_month', 'this_fy']
+const PRESETS: PeriodKey[] = ['this_week', 'last_week', 'this_month', 'last_month', 'this_quarter', 'last_quarter', 'this_fy', 'last_fy']
 
 export function DateRangePicker() {
   const { period, range, setPeriod } = usePrefs()
@@ -36,7 +36,7 @@ export function DateRangePicker() {
             {PRESETS.map(p => (
               <button key={p} onClick={() => { setPeriod(p); setOpen(false) }}
                 className={`text-left text-sm rounded-shoji px-3 py-2 transition-colors duration-calm ${period === p ? 'bg-accent text-sumi' : 'hover:bg-card text-ink'}`}>
-                {p === 'this_fy' ? `This FY (${fyLabel(istToday()).slice(3)})` : PERIOD_LABELS[p]}
+                {p === 'this_fy' ? `This FY (${fyLabel(istToday()).slice(3)})` : p === 'last_fy' ? 'Last FY' : PERIOD_LABELS[p]}
               </button>
             ))}
           </div>

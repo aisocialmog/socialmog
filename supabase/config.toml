@@ -50,3 +50,15 @@ verify_jwt = false
 verify_jwt = false
 [functions.ai_generate]
 verify_jwt = false
+
+# Server-side limits on sign-in attempts (per IP, per 5 minutes) and a 7-day session.
+# Time-boxing sessions needs the Pro plan; the app also signs people out after 7 days itself.
+[auth.rate_limit]
+sign_in_sign_ups = 30
+token_refresh = 150
+otp = 30
+[auth.sessions]
+timebox = "168h"
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true

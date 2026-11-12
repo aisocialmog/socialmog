@@ -18,6 +18,6 @@ export function Placeholder({ title, kanji, feature }: { title: string; kanji: s
 
 export function NotAllowed() {
   return (
-    <div className="shoji"><EmptyState sketch="koi" line="This pond belongs to another role." action={<p className="text-sm text-muted -mt-2">Ask a founder if you need access.</p>} /></div>
+    <div className="shoji"><h1 className="sr-only">Not available for your role</h1><EmptyState sketch="koi" line="This pond belongs to another role." action={<p className="text-sm text-muted -mt-2">Ask a founder if you need access.</p>} /></div>
   )
 }
