@@ -9,7 +9,7 @@ import { usePrefs } from '../lib/prefs'
 
 export function UserMenu() {
   const { member, signOut, isPreview } = useAuth()
-  const { theme, setTheme, seasonal, setSeasonal } = usePrefs()
+  const { effectiveTheme: theme, setTheme, seasonal, setSeasonal } = usePrefs()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const close = useCallback(() => setOpen(false), [])

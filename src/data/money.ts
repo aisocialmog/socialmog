@@ -18,7 +18,7 @@ export interface OrgSettings {
   address: string | null; email: string | null; phone: string | null; logo_path: string | null; invoice_prefix: string
   default_gst_rate: number; default_payment_terms_days: number; default_creator_tds_rate: number
   bank_account_name: string | null; bank_name: string | null; bank_account_number: string | null; bank_ifsc: string | null; bank_branch: string | null
-  upi_id: string | null; invoice_terms: string | null
+  upi_id: string | null; invoice_terms: string | null; invoice_number_digits?: number
 }
 export interface InvoiceItem { id?: string; position: number; description: string; hsn_sac: string | null; quantity: number; rate: number }
 export interface InvoiceInput {
@@ -89,7 +89,7 @@ export const moneyApi = {
   // ── settings & founders ──
   async settings(): Promise<OrgSettings> {
     if (!supabase) return pv.settings()
-    return must(await supabase.from('org_settings').select('company_name, legal_name, gstin, pan, state, state_code, address, email, phone, logo_path, invoice_prefix, default_gst_rate, default_payment_terms_days, default_creator_tds_rate, bank_account_name, bank_name, bank_account_number, bank_ifsc, bank_branch, upi_id, invoice_terms').limit(1).single()) as OrgSettings
+    return must(await supabase.from('org_settings').select('company_name, legal_name, gstin, pan, state, state_code, address, email, phone, logo_path, invoice_prefix, default_gst_rate, default_payment_terms_days, invoice_number_digits, default_creator_tds_rate, bank_account_name, bank_name, bank_account_number, bank_ifsc, bank_branch, upi_id, invoice_terms').limit(1).single()) as OrgSettings
   },
   async saveSettings(patch: Partial<OrgSettings>) {
     if (!supabase) return pv.saveSettings(patch)

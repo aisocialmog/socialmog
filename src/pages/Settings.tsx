@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { CompanySettings } from './money/ReportsSettings'
+import { AppearanceTab, DataTab, ListsTab, SecurityTab } from './settings/SettingsTabs'
 import { Avatar } from '../components/ui/Avatar'
 import { Card, EmptyState, MoreMenu, Pill } from '../components/ui/kit'
 import { Icon } from '../components/ui/Icon'
@@ -19,28 +21,31 @@ interface TeamRow {
 }
 const ROLES: Role[] = ['founder', 'manager', 'team_member', 'freelancer']
 
+const TAB_LABEL = { profile: 'My profile', appearance: 'Appearance', company: 'Company', lists: 'Lists', team: 'Team', security: 'Security', data: 'Data' } as const
+type TabKey = keyof typeof TAB_LABEL
+
 export function Settings() {
   const { role } = useAuth()
-  const [tab, setTab] = useState<'profile' | 'team'>('profile')
-  const tabs = isStaff(role) ? (['profile', 'team'] as const) : (['profile'] as const)
+  const [sp, setSp] = useSearchParams()
+  const staff = isStaff(role)
+  const tabs: TabKey[] = ['profile', 'appearance', ...(staff ? ['company', 'lists', 'team'] as const : []), 'security', ...(staff ? ['data'] as const : [])]
+  const tab = (tabs.find(t => t === sp.get('tab')) ?? 'profile') as TabKey
   return (
     <div className="space-y-6">
       <header>
         <p className="eyebrow mb-2"><span lang="ja" className="font-mincho text-accent-ink normal-case tracking-normal text-sm mr-2">設</span>Settings</p>
         <h1 className="font-mincho text-3xl text-ink">Settings</h1>
       </header>
-      {tabs.length > 1 && (
-        <div role="tablist" aria-label="Settings sections" className="flex gap-1 border-b border-line/25">
-          {tabs.map(t => (
-            <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}
-              className={`relative px-4 h-11 text-sm ${tab === t ? 'text-ink' : 'text-muted hover:text-ink'}`}>
-              {t === 'profile' ? 'My profile' : 'Team'}
-              {tab === t && <span className="absolute left-3 right-3 -bottom-px h-[2px] bg-accent rounded-full" />}
-            </button>
-          ))}
-        </div>
-      )}
-      {tab === 'profile' ? <Profile /> : <Team />}
+      <div role="tablist" aria-label="Settings sections" className="flex gap-1 border-b border-line/25 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+        {tabs.map(t => (
+          <button key={t} role="tab" aria-selected={tab === t} onClick={() => setSp(t === 'profile' ? {} : { tab: t })}
+            className={`relative px-4 h-11 text-sm whitespace-nowrap ${tab === t ? 'text-ink' : 'text-muted hover:text-ink'}`}>
+            {TAB_LABEL[t]}
+            {tab === t && <span className="absolute left-3 right-3 -bottom-px h-[2px] bg-accent rounded-full" />}
+          </button>
+        ))}
+      </div>
+      {tab === 'profile' ? <Profile /> : tab === 'team' ? <Team /> : tab === 'appearance' ? <AppearanceTab /> : tab === 'company' ? <CompanySettings /> : tab === 'lists' ? <ListsTab /> : tab === 'security' ? <SecurityTab /> : <DataTab />}
       {role === 'founder' && (
         <Link to="/settings/opening" className="shoji shoji-pad flex items-center justify-between gap-4 hover:bg-raised/60 transition-colors duration-calm">
           <span className="min-w-0">
@@ -52,14 +57,14 @@ export function Settings() {
       )}
       {(role === 'founder' || role === 'manager') && [
         ['/settings/automations', 'Automations', 'What the system does by itself: on/off, last run, results, run now. Task templates and messages to approve.'],
-        ['/settings/ai', 'AI providers', 'Provider order, models and daily usage.'],
+        ['/settings/ai', 'AI providers', 'Provider order, key status (set or not set) and daily usage.'],
+        ['/settings/health', 'Health check', 'Recalculates every total from its records and flags any that don’t match.'],
         ...(role === 'founder' ? [['/settings/integrations', 'Integrations — Ops Board', 'API key, allowed website, webhooks and the API document.']] : []),
       ].map(([to, title, about]) => (
         <Link key={to} to={to} className="shoji shoji-pad flex items-center justify-between gap-4 hover:bg-raised/60 transition-colors duration-calm">
           <span className="min-w-0"><span className="block text-ink font-medium">{title}</span><span className="block text-sm text-muted mt-0.5">{about}</span></span>
           <Icon name="chevronRight" className="text-muted shrink-0" />
         </Link>))}
-      <p className="text-xs text-muted">Company details, security and backups arrive with feature 13.</p>
     </div>
   )
 }

@@ -2,6 +2,7 @@
 // (search, filters, sort, CSV), the "why are you changing this?" prompt,
 // stat tiles and the history list.
 import { useMemo, useState, type ReactNode } from 'react'
+import { useReauth } from '../../lib/reauth'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { usePeriod } from '../../lib/prefs'
@@ -83,12 +84,21 @@ export function ReasonModal({ title, action = 'Save', note, onClose, onConfirm, 
   const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const reauth = useReauth()
   return (
     <Modal title={title} onClose={onClose}>
       <form className="space-y-4" onSubmit={async e => {
         e.preventDefault(); if (reason.trim().length < 3) { setError('Write a short reason — it goes into the history.'); return }
         setBusy(true); setError(null)
-        try { await onConfirm(reason.trim()); onClose() } catch (er) { setError(er instanceof Error ? er.message : String(er)) } finally { setBusy(false) }
+        const go = () => onConfirm(reason.trim())
+        try {
+          try { await go() }
+          catch (er) {   // a closed month: confirm the password, then try once more
+            if (!(er instanceof Error && /re-enter your password/i.test(er.message)) || !(await reauth('This record is in a closed month.'))) throw er
+            await go()
+          }
+          onClose()
+        } catch (er) { setError(er instanceof Error ? er.message : String(er)) } finally { setBusy(false) }
       }}>
         {note && <div className="text-sm text-muted">{note}</div>}
         <label className="block"><span className="text-sm text-ink">Reason</span>

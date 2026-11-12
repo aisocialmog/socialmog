@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { useReauth } from '../../lib/reauth'
 import { AiRecordTools } from '../../components/work/Ai'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { creatorsApi, type CreatorOverview, type PaymentDetails, type PlatformRow } from '../../data/creators'
@@ -345,7 +346,8 @@ function Payments({ creatorId }: { creatorId: string }) {
   const { role } = useAuth()
   const founder = role === 'founder'
   const payouts = useAsync(() => creatorsApi.payouts(creatorId), [creatorId])
-  const details = useAsync(() => founder ? creatorsApi.payment(creatorId) : Promise.resolve(null), [creatorId, founder])
+  const reauth = useReauth()
+  const details = useAsync(async () => founder && await reauth('Bank and UPI details are protected.') ? creatorsApi.payment(creatorId) : null, [creatorId, founder])
   const [reveal, setReveal] = useState(false)
   const [editing, setEditing] = useState(false)
   const d = details.data

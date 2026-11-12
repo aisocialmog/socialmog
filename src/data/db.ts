@@ -33,6 +33,13 @@ export const db = {
     if (!supabase) return pv.del(table, match)
     const { error } = await supabase.from(table).delete().match(match); check(error)
   },
+  /** A file from an Edge Function (the function must answer as application/octet-stream). */
+  async download(fn: string, body: Record<string, unknown>): Promise<Blob> {
+    if (!supabase) return pv.download(fn, body)
+    const { data, error } = await supabase.functions.invoke(fn, { body })
+    if (error) { const d = await (error as { context?: Response }).context?.json?.().catch(() => null); throw new Error(d?.error ?? error.message) }
+    return data as Blob
+  },
   /** Call an Edge Function as the signed-in user. */
   async invoke<T>(fn: string, body: Record<string, unknown>): Promise<T> {
     if (!supabase) return pv.invoke(fn, body) as T

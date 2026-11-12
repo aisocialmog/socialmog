@@ -37,11 +37,15 @@ const previewMember = (role: Role): Member => ({
     : role === 'freelancer' ? { name: 'Preview Freelancer' } : {}),
 })
 
+export const SESSION_DAYS = 7
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>({ kind: 'loading' })
 
   const load = useCallback(async (session: Session | null) => {
     if (!session || !supabase) { setState({ kind: 'signed_out' }); return }
+    // a login older than SESSION_DAYS is ended (the Supabase project is also set to time-box sessions)
+    if (Date.now() - Date.parse(session.user.last_sign_in_at ?? '') > SESSION_DAYS * 86_400_000) { await supabase.auth.signOut(); setState({ kind: 'signed_out' }); return }
     const { data } = await supabase.from('team_members')
       .select('id, name, email, phone, title, photo_path, role, status, joined_date')
       .eq('user_id', session.user.id).maybeSingle()

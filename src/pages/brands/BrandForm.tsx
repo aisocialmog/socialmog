@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { db } from '../../data/db'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { brandsApi, type BrandInput, type RetainerInput } from '../../data/brands'
 import { useAsync } from '../../hooks/useAsync'
@@ -29,6 +30,7 @@ interface FormState {
 export function BrandForm() {
   const { id } = useParams()
   const editing = Boolean(id)
+  const sources = useAsync(() => db.rows<{ name: string; is_archived: boolean }>('list_items', { kind: 'lead_source' }, 'name').catch(() => []), [])
   const nav = useNavigate()
   const { member } = useAuth()
   const owners = useAsync(() => brandsApi.owners(), [])
@@ -177,7 +179,7 @@ export function BrandForm() {
         </label>
         <label className="text-sm text-muted">Lead source
           <input className="field mt-1.5" list="sources" value={f.source} onChange={set('source')} placeholder="Referral, Instagram…" />
-          <datalist id="sources">{LEAD_SOURCES.map(s => <option key={s} value={s} />)}</datalist>
+          <datalist id="sources">{(sources.data ?? []).filter(x => !x.is_archived).map(x => x.name).concat(sources.data?.length ? [] : LEAD_SOURCES).map(s => <option key={s} value={s} />)}</datalist>
         </label>
         <label className="text-sm text-muted sm:col-span-2">Owner — who handles this brand
           <select className="field mt-1.5" value={f.owner_id} onChange={set('owner_id')}>

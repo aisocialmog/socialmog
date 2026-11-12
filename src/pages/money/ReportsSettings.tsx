@@ -133,6 +133,17 @@ function Tds({ from, to }: { from: string; to: string }) {
 
 // ─── Settings ───────────────────────────────────────────────
 export function MoneySettings() {
+  return (
+    <div className="space-y-6">
+      <MoneyHeader title="Money settings" kanji="設" />
+      <MoneyTabs />
+      <CompanySettings />
+    </div>
+  )
+}
+
+/** Company, bank/UPI, invoice defaults, profit shares and expense categories (also shown in Settings → Company). */
+export function CompanySettings() {
   const founder = useIsFounder()
   const org = useAsync(() => moneyApi.settings(), [])
   const [s, setS] = useState<OrgSettings | null>(null)
@@ -147,8 +158,6 @@ export function MoneySettings() {
   )
   return (
     <div className="space-y-6">
-      <MoneyHeader title="Money settings" kanji="設" />
-      <MoneyTabs />
       <form className="space-y-4" onSubmit={async e => { e.preventDefault(); if (await act.run(() => moneyApi.saveSettings({ ...s, gstin: s.gstin?.toUpperCase() ?? null, state: s.state_code ? GST_STATES[s.state_code] ?? s.state : s.state }))) setSaved(true) }}>
         <Card className="shoji-pad grid sm:grid-cols-2 gap-4">
           <SectionTitle kanji="社">On every invoice</SectionTitle><span className="hidden sm:block" />
@@ -177,6 +186,9 @@ export function MoneySettings() {
         <Card className="shoji-pad grid sm:grid-cols-3 gap-4">
           <SectionTitle kanji="既">Defaults</SectionTitle><span className="hidden sm:block" /><span className="hidden sm:block" />
           {f('invoice_prefix', 'Invoice prefix', 'SM → SM/26-27/001')}
+          <label className="block"><span className="text-sm text-ink">Number digits</span>
+            <select className="field mt-1.5" value={s.invoice_number_digits ?? 3} onChange={e => { setSaved(false); setS({ ...s, invoice_number_digits: Number(e.target.value) }) }}>{[3, 4, 5, 6].map(n => <option key={n} value={n}>{n} digits ({String(1).padStart(n, '0')})</option>)}</select>
+            <span className="text-xs text-muted">Numbers restart each financial year. The financial year runs 1 April – 31 March (India’s statutory year).</span></label>
           {f('default_gst_rate', 'GST rate %', undefined, 'number')}
           {f('default_payment_terms_days', 'Payment terms (days)', 'Used when a brand has none', 'number')}
           {f('default_creator_tds_rate', 'Creator TDS %', 'Pre-filled on new payouts', 'number')}
@@ -211,7 +223,7 @@ function Shares() {
   )
 }
 
-function Categories() {
+export function Categories() {
   const { data, reload } = useAsync(() => moneyApi.categories(true), [])
   const [name, setName] = useState('')
   const [treatment, setTreatment] = useState<Treatment>('direct')

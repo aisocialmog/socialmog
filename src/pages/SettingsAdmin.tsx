@@ -10,6 +10,7 @@ import { useAuth } from '../lib/auth'
 import { formatDateTime } from '../lib/format'
 import { supabase } from '../lib/supabase'
 import { db } from '../data/db'
+import { useReauth } from '../lib/reauth'
 
 const Back = ({ title, kanji }: { title: string; kanji: string }) => <>
   <Link to="/settings" className="text-sm text-muted hover:text-ink inline-flex items-center gap-1"><Icon name="chevronLeft" /> Settings</Link>
@@ -131,6 +132,7 @@ export function IntegrationsPage() {
   const act = useAsyncAction()
   if (role !== 'founder') return <div className="space-y-5"><Back title="Integrations" kanji="繋" /><p className="text-sm text-muted">API keys are for founders only.</p></div>
   const saveOrg = (p: Record<string, string | null>) => act.run(async () => { await db.update('org_settings', org!.id, p); await reloadOrg() })
+  const reauth = useReauth()
   const live = (keys ?? []).filter(k => !k.revoked_at)
   return (
     <div className="space-y-5 sm:space-y-6 max-w-4xl">
@@ -145,10 +147,10 @@ export function IntegrationsPage() {
           <li key={k.id} className="py-3 flex flex-wrap items-center gap-3"><span className="flex-1 min-w-[12rem]"><span className="block text-sm text-ink">{k.name} <code className="text-muted num">{k.key_prefix}…</code></span>
             <span className="block text-xs text-muted">Created {formatDateTime(k.created_at)} · {k.last_used_at ? `last used ${formatDateTime(k.last_used_at)}` : 'never used'}{k.rate_limit_per_min && ` · ${k.rate_limit_per_min} requests a minute`}</span></span>
             {k.revoked_at ? <Pill>Revoked</Pill> : <>
-              <button className="btn-ghost" disabled={act.busy} onClick={() => window.confirm('Rotate this key? The current key stops working immediately.') && act.run(async () => { setFresh(await db.rpc<string>('ops_key_rotate', { p_id: k.id })); await reload() })}>Rotate</button>
+              <button className="btn-ghost" disabled={act.busy} onClick={() => window.confirm('Rotate this key? The current key stops working immediately.') && act.run(async () => { if (!(await reauth('Rotating an API key is sensitive.'))) return; setFresh(await db.rpc<string>('ops_key_rotate', { p_id: k.id })); await reload() })}>Rotate</button>
               <button className="btn-ghost" disabled={act.busy} onClick={() => window.confirm('Revoke this key? The Ops Board will lose access immediately.') && act.run(async () => { await db.rpc('ops_key_revoke', { p_id: k.id }); await reload() })}>Revoke</button></>}</li>))}
           {keys?.length === 0 && <li className="py-3 text-sm text-muted">No key yet.</li>}</ul>
-        {live.length === 0 && <button className="btn-primary" disabled={act.busy} onClick={() => act.run(async () => { setFresh(await db.rpc<string>('ops_key_create', { p_name: 'Ops Board' })); await reload() })}>Create the Ops Board key</button>}
+        {live.length === 0 && <button className="btn-primary" disabled={act.busy} onClick={() => act.run(async () => { if (!(await reauth('Creating an API key is sensitive.'))) return; setFresh(await db.rpc<string>('ops_key_create', { p_name: 'Ops Board' })); await reload() })}>Create the Ops Board key</button>}
       </Card>
       <Card className="shoji-pad">
         <SectionTitle kanji="域">Ops Board address</SectionTitle>
@@ -188,6 +190,7 @@ export function AiSettingsPage() {
   const { role } = useAuth()
   const founder = role === 'founder'
   const { data, reload } = useAsync(() => db.rows<Provider>('ai_providers', {}, 'priority'), [])
+  const { data: keyStatus } = useAsync(() => db.invoke<{ keys: Record<string, boolean> }>('admin', { action: 'ai_status' }).then(r => r.keys, () => null), [])
   const { data: usage } = useAsync(() => supabase ? db.rpc<UsageDay[]>('ai_usage_daily', { p_days: 14 }) : Promise.resolve([] as UsageDay[]), [])
   const act = useAsyncAction()
   const patch = (id: string, p: Partial<Provider>) => act.run(async () => { await db.update('ai_providers', id, p); await reload() })
@@ -206,7 +209,7 @@ export function AiSettingsPage() {
             <label className="text-xs text-muted">Model<input className="field mt-1" disabled={!founder} defaultValue={p.model} onBlur={e => e.target.value !== p.model && patch(p.id, { model: e.target.value.trim() })} /></label>
             <label className="text-xs text-muted">Free calls / day<input type="number" min={0} className="field mt-1 num" disabled={!founder} defaultValue={p.daily_limit} onBlur={e => Number(e.target.value) !== p.daily_limit && patch(p.id, { daily_limit: Number(e.target.value) || 0 })} /></label>
             <span className="flex items-center gap-2 pb-2"><Toggle on={p.is_enabled} label={`${p.name} enabled`} disabled={!founder} onChange={v => patch(p.id, { is_enabled: v })} /></span>
-            <p className="text-xs text-muted sm:col-span-5 -mt-1">Key: Supabase secret <code className="text-ink">{p.secret_name}</code> — set with <code className="text-ink">supabase secrets set {p.secret_name}=…</code></p></li>))}</ul>
+            <p className="text-xs text-muted sm:col-span-5 -mt-1 flex flex-wrap items-center gap-2">Key: <Pill tone={keyStatus?.[p.secret_name] ? 'ink' : 'alert'}>{keyStatus == null ? 'Status unavailable' : keyStatus[p.secret_name] ? '✓ Set' : '✗ Not set'}</Pill> Supabase secret <code className="text-ink">{p.secret_name}</code> — never shown here. Set it with <code className="text-ink">supabase secrets set {p.secret_name}=…</code></p></li>))}</ul>
       </Card>
       <Card className="shoji-pad">
         <SectionTitle kanji="量">Daily usage — last 14 days</SectionTitle>

@@ -61,6 +61,17 @@ export const T: Record<string, Row[]> = {
   presence: [{ id: 'pr1', member_id: ME, status: 'working', message: null, since: hoursAgo(2), expected_back: null }, { id: 'pr2', member_id: F2, status: 'in_shoot', message: 'Chai Sutra shoot', since: hoursAgo(1), expected_back: null }],
 }
 
+T.tags = ['Food', 'Beauty', 'Fashion', 'Fitness', 'Travel', 'Tech'].map((n, i) => ({ id: 'tg' + i, name: n, kind: 'niche', is_archived: false }))
+T.list_items = ['Referral', 'Inbound', 'Outreach', 'Instagram', 'LinkedIn', 'Event'].map((n, i) => ({ id: 'ls' + i, kind: 'lead_source', name: n, is_archived: false }))
+T.list_labels = []
+T.backups = [
+  { id: 'bk1', kind: 'full', trigger: 'scheduled', status: 'succeeded', storage_path: '2026-11-11/social-mog-backup.zip', size_bytes: 1843200, created_at: hoursAgo(10), finished_at: hoursAgo(10), is_archived: false },
+  { id: 'bk2', kind: 'full', trigger: 'scheduled', status: 'succeeded', storage_path: '2026-11-10/social-mog-backup.zip', size_bytes: 1801000, created_at: hoursAgo(34), finished_at: hoursAgo(34), is_archived: false },
+  { id: 'bk3', kind: 'full', trigger: 'scheduled', status: 'failed', storage_path: null, size_bytes: null, error: 'brands: connection timed out', created_at: hoursAgo(58), finished_at: hoursAgo(58), is_archived: false }]
+const TRASH: Row[] = [
+  { table_name: 'tasks', record_id: 't8', noun: 'Task', label: 'Plan December content calendar', archived_at: hoursAgo(30), days_left: 28 },
+  { table_name: 'invoices', record_id: 'i9', noun: 'Invoice', label: 'Draft invoice', archived_at: hoursAgo(120), days_left: 25 },
+  { table_name: 'creators', record_id: 'cr9', noun: 'Creator', label: 'Rhea Nair (sample)', archived_at: hoursAgo(600), days_left: 5 }]
 const name = (id: string | null) => T.team_directory.find(m => m.id === id)?.name ?? null
 const taskList = (): Row[] => T.tasks.map(t => {
   const ids = T.task_assignees.filter(a => a.task_id === t.id).map(a => a.member_id)
@@ -126,6 +137,15 @@ const AUTOS: Row[] = [
   .map(([key, name, description, schedule_label, last_result], i) => ({ id: 'au' + i, key, name, description, schedule_label, is_enabled: true, last_run_at: last_result ? hoursAgo(3 + i) : null, last_result, last_error: null, runs_by_hand: key !== 'payout_on_approval' }))
 T.automations = AUTOS
 const RPC: Record<string, (a: Row) => any> = {
+  trash_list: () => TRASH.slice(),
+  trash_restore: a => { const i = TRASH.findIndex(t => t.record_id === a.p_id); if (i >= 0) TRASH.splice(i, 1) },
+  security_report: () => ['activity_log', 'andons', 'api_clients', 'backups', 'brands', 'campaigns', 'capital_entries', 'creator_payment_details', 'creators', 'expenses', 'invoices', 'tasks', 'team_members'].map(t => ({ table_name: t, rls_enabled: true, policies: t === 'capital_entries' ? 3 : 4, open_policies: 0, anon_policies: 0, issue: null })),
+  health_check: () => [
+    ['Invoices', 'Invoice subtotals = the lines on sent invoices', 482000, 482000], ['Invoices', 'Paid on invoices = payments applied to them', 356000, 356000],
+    ['Money', 'Receivables on the overview = unpaid invoices', 226700, 226700], ['Money', 'Revenue on the P&L = invoiced amounts (before GST)', 482000, 482000],
+    ['Money', 'Account balances = opening balances + every movement', 1180000, 1180000], ['Money', 'Payouts pending = unpaid payouts', 64000, 64000],
+    ['Money', 'Every paid payout has its expense', 6, 6], ['Capital', 'Per-founder capital adds up to the capital entries', 1250000, 1250000]]
+    .map(([area, check_name, expected, actual]) => ({ area, check_name, expected, actual, ok: expected === actual, detail: '' })),
   timer_start: a => { RPC.timer_stop({}); T.time_logs.push({ id: uid(), member_id: ME, task_id: a.p_task, started_at: now(), ended_at: null, duration_minutes: null, source: a.p_source ?? 'timer' }); const t = T.tasks.find(x => x.id === a.p_task); if (t?.status === 'todo') t.status = 'in_progress' },
   timer_stop: () => T.time_logs.filter(l => !l.ended_at).forEach(l => { l.ended_at = now(); l.duration_minutes = (Date.now() - Date.parse(l.started_at)) / 60000 }),
   task_activity: a => FEED.filter(f => f.table_name === 'tasks' && f.record_id === a.p_task),
@@ -175,6 +195,9 @@ const SAMPLE_AI: Record<string, string> = {
   ask: 'Chai Sutra was the most profitable brand last month with ₹1,82,000 profit on ₹2,55,000 revenue (71% margin).',
 }
 const INVOKE: Record<string, (b: Row) => any> = {
+  admin: b => b.action === 'ai_status' ? { keys: { GEMINI_API_KEY: true, GROQ_API_KEY: true, OPENROUTER_API_KEY: false } }
+    : b.action === 'backup_now' ? (() => { const r = { id: 'bk' + ++seq, kind: 'full', trigger: 'manual', status: 'succeeded', storage_path: 'now.zip', size_bytes: 1850000, created_at: now(), finished_at: now(), is_archived: false }; T.backups.unshift(r); return r })()
+    : b.action === 'backup_link' ? { url: 'data:text/plain,preview-backup' } : {},
   ai_generate: b => b.task === 'notes_to_tasks'
     ? { output: JSON.stringify([{ title: 'Send revised quote to Kiko Kids', assignee: '[Founder 2 name]', due_date: addDaysISO(today, 1) }, { title: 'Book studio for the 14th', assignee: '[Founder 1 name]', due_date: addDaysISO(today, 3) }]), provider: 'Preview', cached: false }
     : b.task === 'creator_reasons' ? { output: JSON.stringify(Object.fromEntries((b.input.creators as Row[]).map(c => [c.creator_id, `Strong ${c.niches?.[0] ?? 'niche'} fit in ${c.city}; rate sits inside the budget.`]))), provider: 'Preview', cached: false }
@@ -202,5 +225,9 @@ export const pv = {
   },
   del(table: string, match: Match) { T[table] = (T[table] ?? []).filter(r => !matches(r, match)) },
   rpc(fn: string, args: Row): unknown { if (!RPC[fn]) throw new Error(`Preview has no stand-in for ${fn}()`); return RPC[fn](args) ?? null },
+  download(_fn: string, _body: Row): Blob {
+    const csv = ['id,title,status', ...T.tasks.map(t => `${t.id},"${t.title}",${t.status}`)].join('\r\n')
+    return new Blob([`Preview export\r\n${csv}`], { type: 'application/octet-stream' })
+  },
   invoke(fn: string, body: Row): unknown { if (!INVOKE[fn]) throw new Error(`Preview has no stand-in for the ${fn} function`); return INVOKE[fn](body) },
 }

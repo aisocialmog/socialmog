@@ -4,6 +4,11 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import './styles/index.css'
 import { PrefsProvider } from './lib/prefs'
 import { AuthProvider, useAuth } from './lib/auth'
+import { applyLabels, useLabelsVersion, type LabelRow } from './lib/labels'
+import { db } from './data/db'
+import { PrefsSync } from './lib/prefsSync'
+import { ReauthProvider } from './lib/reauth'
+import { MfaGate, useMfa } from './pages/auth/MfaGate'
 import { canOpen, NAV } from './lib/access'
 import { AppShell } from './layout/AppShell'
 import { Dashboard } from './pages/Dashboard'
@@ -37,6 +42,7 @@ import { ReportsPage } from './pages/ReportsPage'
 import { KaizenPage } from './pages/KaizenPage'
 import { FocusPage } from './pages/FocusPage'
 import { AiPage } from './pages/AiPage'
+import { HealthPage } from './pages/settings/SettingsTabs'
 import { AiSettingsPage, AutomationsPage, IntegrationsPage } from './pages/SettingsAdmin'
 import { OpeningWizard } from './pages/opening/OpeningWizard'
 import { NotAllowed, Placeholder } from './pages/Placeholder'
@@ -55,22 +61,29 @@ function Loading() {
 /** Everything behind login. Pages a role can't open show NotAllowed
  *  (and the database returns nothing for them anyway). */
 function Protected() {
-  const { state, role } = useAuth()
+  const { state, role, isPreview, signOut } = useAuth()
   const loc = useLocation()
+  const mfa = useMfa(role, state.kind === 'ready' && !isPreview)
+  const [labelsReady, setLabelsReady] = React.useState(false)
+  const labelsVersion = useLabelsVersion()
+  React.useEffect(() => { if (state.kind === 'ready') db.rows<LabelRow>('list_labels').then(applyLabels, () => null).finally(() => setLabelsReady(true)) }, [state.kind])
   if (state.kind === 'loading') return <Loading />
   if (state.kind === 'signed_out') return <Navigate to="/login" replace state={{ from: loc.pathname }} />
   if (state.kind === 'no_access') return <NoAccess email={state.email} reason={state.reason} />
+  if (mfa.status === 'loading' || !labelsReady) return <Loading />
+  if (mfa.status !== 'ok') return <MfaGate status={mfa.status} email={state.member.email} onDone={mfa.recheck} onSignOut={signOut} />
   const allowed = canOpen(role!, loc.pathname)
   return (
     <AppShell>
       {!allowed ? <NotAllowed /> : (
-        <Routes>
+        <Routes key={labelsVersion}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/settings/opening" element={<OpeningWizard />} />
           <Route path="/settings/automations" element={<AutomationsPage />} />
           <Route path="/settings/integrations" element={<IntegrationsPage />} />
           <Route path="/settings/ai" element={<AiSettingsPage />} />
+          <Route path="/settings/health" element={<HealthPage />} />
           <Route path="/brands" element={<BrandsPage />} />
           <Route path="/brands/new" element={<BrandForm />} />
           <Route path="/brands/:id" element={<BrandDetail />} />
@@ -138,7 +151,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <PrefsProvider>
       <AuthProvider>
-        <BrowserRouter>
+        <PrefsSync />
+        <ReauthProvider><BrowserRouter>
           <Routes>
             <Route path="/login" element={<PublicOnly><Login /></PublicOnly>} />
             <Route path="/forgot-password" element={<PublicOnly><ForgotPassword /></PublicOnly>} />
@@ -147,7 +161,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/share/calendar/:token" element={<SharedCalendar />} />
             <Route path="/*" element={<Protected />} />
           </Routes>
-        </BrowserRouter>
+        </BrowserRouter></ReauthProvider>
       </AuthProvider>
     </PrefsProvider>
   </React.StrictMode>,

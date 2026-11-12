@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { clearFailures, lockedFor, lockMessage, registerFailure } from '../../lib/attempts'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { isSupabaseConfigured, supabase } from '../../lib/supabase'
 import { authMessage, PREVIEW_ALLOWED, useAuth } from '../../lib/auth'
@@ -19,11 +20,13 @@ export function Login() {
   async function signIn(e: FormEvent) {
     e.preventDefault()
     if (!supabase) return
+    const key = 'login:' + email.trim().toLowerCase(), wait = lockedFor(key)
+    if (wait) { setError(lockMessage(wait)); return }
     setBusy('password'); setError(null)
     const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
     setBusy(null)
-    if (error) setError(authMessage(error.message))
-    else nav(after, { replace: true })
+    if (error) { registerFailure(key); const w = lockedFor(key); setError(w ? lockMessage(w) : authMessage(error.message)) }
+    else { clearFailures(key); nav(after, { replace: true }) }
   }
 
   async function google() {

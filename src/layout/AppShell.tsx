@@ -75,7 +75,7 @@ function BottomTabs({ tabs, more, onMore, moreOpen }: { tabs: NavItem[]; more: N
 
 function MoreSheet({ items, onClose }: { items: NavItem[]; onClose: () => void }) {
   const { member, signOut } = useAuth()
-  const { theme, setTheme } = usePrefs()
+  const { effectiveTheme: theme, setTheme } = usePrefs()
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k)

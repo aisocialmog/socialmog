@@ -41,17 +41,17 @@ const istHour = (now: Date) => Number(new Intl.DateTimeFormat('en-GB', { timeZon
 
 function Hero({ name, children }: { name: string; children?: React.ReactNode }) {
   const now = useMinute()
-  const { seasonal } = usePrefs()
+  const { seasonal, fuji } = usePrefs()
   const g = greeting(now), ph = skyPhase(now), se = season(now)
   const weekday = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(now)
   return (
     <section className="shoji relative overflow-hidden">
-      <div className="relative sm:min-h-[15rem]">
-        <div className="relative h-32 sm:absolute sm:inset-0 sm:h-auto">
+      <div className={`relative ${fuji ? 'sm:min-h-[15rem]' : ''}`}>
+        {fuji && <div className="relative h-32 sm:absolute sm:inset-0 sm:h-auto">
           <Fuji phase={ph} season={se} showSeason={seasonal} className="absolute inset-0 w-full h-full" />
           {seasonal && <SeasonalLayer season={se} />}
-        </div>
-        <div className="relative px-6 pb-6 pt-4 sm:p-8 sm:max-w-[24rem] sm:bg-gradient-to-r from-card via-card to-card/0 sm:pr-16 flex flex-col justify-end sm:min-h-[15rem]">
+        </div>}
+        <div className={`relative px-6 pb-6 pt-4 sm:p-8 flex flex-col justify-end ${fuji ? 'sm:max-w-[24rem] sm:bg-gradient-to-r from-card via-card to-card/0 sm:pr-16 sm:min-h-[15rem]' : ''}`}>
           <p className="eyebrow mb-3"><span lang="ja">{g.kana}</span> · <span lang="ja">{SEASON_NAMES[se].kanji}</span> {SEASON_NAMES[se].en}</p>
           <h1 className="font-mincho text-3xl sm:text-4xl text-ink leading-tight">{g.romaji},<br /><span className="text-accent-ink">{name}</span></h1>
           <p className="mt-3 text-sm text-muted">{weekday}, {formatDate(now)}</p>

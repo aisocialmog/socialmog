@@ -2,6 +2,7 @@
 // its matching expense in the database. "Payouts due" groups what's owed by
 // person, with UPI IDs for founders.
 import { useEffect, useMemo, useState } from 'react'
+import { useReauth } from '../../lib/reauth'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { moneyApi, type PayoutInput, type PayoutRow } from '../../data/money'
 import { useAsync } from '../../hooks/useAsync'
@@ -66,7 +67,8 @@ export function PayoutsPage() {
 export function PayoutsDue() {
   const founder = useIsFounder()
   const { data, reload } = useAsync(() => moneyApi.payouts(), [])
-  const upi = useAsync(() => founder ? moneyApi.payeeUpi() : Promise.resolve({} as Record<string, string>), [founder])
+  const reauth = useReauth()
+  const upi = useAsync(async () => founder && await reauth('Creator UPI details are protected.') ? moneyApi.payeeUpi() : ({} as Record<string, string>), [founder])
   const [paying, setPaying] = useState<PayoutRow | null>(null)
   const groups = useMemo(() => {
     const m = new Map<string, PayoutRow[]>()
