@@ -207,7 +207,7 @@ select pg_temp.login(:MGR);
 select pg_temp.expect_error('manager can’t run automations', $q$select run_automation('reminders')$q$, '%Only a founder%');
 select pg_temp.expect_error('automation bodies aren’t callable directly', $q$select automation_reminders()$q$);
 select pg_temp.login(:F1);
-select pg_temp.expect('17 automations listed', (select count(*) from automations_list()), 17::bigint);
+select pg_temp.expect('19 automations listed', (select count(*) from automations_list()), 19::bigint);
 select pg_temp.expect('every scheduled automation runs without error', (select count(*) from automations a where a.schedule is not null and a.key not in ('daily_digest','weekly_insight','month_end_close') and run_automation(a.key) like 'Failed%'), 0::bigint);
 select pg_temp.expect('runs are logged', (select count(*) >= 11 from automation_runs where was_manual), true);
 select pg_temp.expect('trigger automations explain themselves', run_automation('creator_paid'), 'Runs by itself when the record changes — nothing to run by hand.');
