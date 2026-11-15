@@ -56,7 +56,6 @@ verify_jwt = false
 [auth.rate_limit]
 sign_in_sign_ups = 30
 token_refresh = 150
-otp = 30
 [auth.sessions]
 timebox = "168h"
 [auth.mfa.totp]
