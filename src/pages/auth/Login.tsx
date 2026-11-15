@@ -7,6 +7,9 @@ import { ROLE_LABEL, type Role } from '../../lib/access'
 import { AuthLayout, FormError, GoogleMark } from './AuthLayout'
 import { EnsoSpinner } from '../../components/art/Ink'
 
+// Google sign-in is off unless VITE_ENABLE_GOOGLE=true (and Google is set up in Supabase).
+const GOOGLE = import.meta.env.VITE_ENABLE_GOOGLE === 'true'
+
 export function Login() {
   const nav = useNavigate()
   const loc = useLocation() as { state?: { from?: string; error?: string } }
@@ -57,6 +60,7 @@ export function Login() {
         </div>
       )}
 
+      {GOOGLE && <>
       <button type="button" onClick={google} disabled={!supabase || busy !== null}
         className="btn-ghost w-full justify-center gap-3 disabled:opacity-50">
         {busy === 'google' ? <EnsoSpinner size={18} label="Opening Google" /> : <GoogleMark />} Continue with Google
@@ -65,6 +69,8 @@ export function Login() {
       <div className="flex items-center gap-3 my-5 text-xs text-muted" aria-hidden>
         <span className="h-px flex-1 bg-line/30" />or<span className="h-px flex-1 bg-line/30" />
       </div>
+
+      </>}
 
       <form className="space-y-4" onSubmit={signIn} noValidate>
         {error && <FormError>{error}</FormError>}
