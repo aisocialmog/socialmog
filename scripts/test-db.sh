@@ -8,9 +8,14 @@ DB=${DB:-smog_test}
 TMP=$(mktemp -d)
 # test founders replace the placeholders (the real file keeps them)
 for f in supabase/migrations/*.sql; do
-  sed -e 's/\[Founder 1 name\]/Founder One/; s/\[Founder 1 email\]/founder1@example.com/' \
-      -e 's/\[Founder 2 name\]/Founder Two/; s/\[Founder 2 email\]/founder2@example.com/' "$f" > "$TMP/$(basename "$f")"
+  cp "$f" "$TMP/$(basename "$f")"
 done
+# the tests use their own founders, whatever the real seed file says
+python3 - "$TMP/20261109000800_seed_founders.sql" <<'PY'
+import re, sys
+p = sys.argv[1]; s = open(p).read(); n = iter([("Founder One", "founder1@example.com"), ("Founder Two", "founder2@example.com")])
+open(p, "w").write(re.sub(r"\['[^']*', '[^']*'\]", lambda m: "['%s', '%s']" % next(n), s, count=2))
+PY
 # fresh start: the test database and the stub roles (roles are cluster-wide)
 psql -q -c "drop database if exists $DB" postgres
 for r in app_owner anon authenticated service_role; do

@@ -1,9 +1,7 @@
 -- Social Mog OS — 0008 the two founders.
 --
--- ┌────────────────────────────────────────────────────────────────┐
--- │  PUT THE REAL NAMES AND EMAILS HERE BEFORE `supabase db push`. │
--- │  The migration stops with an error while placeholders remain.  │
--- └────────────────────────────────────────────────────────────────┘
+-- The two founders (real names and emails). The migration stops with an error
+-- if a placeholder like "[Founder 1 name]" is ever put back.
 --
 -- After pushing, invite both emails once from the Supabase dashboard
 -- (Authentication → Users → Invite user). Their logins link to these rows
@@ -13,8 +11,8 @@
 do $$
 declare
   founders constant text[][] := array[
-    ['[Founder 1 name]', '[Founder 1 email]'],
-    ['[Founder 2 name]', '[Founder 2 email]']
+    ['Harshit Naryan Singh', 'workmailatit@gmail.com'],
+    ['Devesh Agrawal', 'agrawaldevesh009@gmail.com']
   ];
   i int;
 begin
